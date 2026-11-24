@@ -22,16 +22,19 @@ Standing acceptance for every executor task (the tester checks these even when n
     - `git status --porcelain` shows no `.venv/`, caches or `.coverage` (gitignored)
 
 ## Phase 1: Core export CLI — `exit-archive export --out DIR` writes a complete archive from the live trial account
-- [ ] T1.1 Token wrapper, safe errors and log redaction — owner: executor — est: 1h
-  - [ ] T1.1.1 `secrets.py`: `HarvestToken` (frozen, `__repr__`/`__str__`/`__format__` → `HarvestToken(***)`, `.reveal()`), `redact(text, token)` replacing the value and `Bearer \S+`, `install_log_redaction(token)` logging filter
-  - [ ] T1.1.2 `errors.py`: `ExitArchiveError` base + `AuthError`, `ForbiddenError`, `NotFoundError`, `RateLimitedError`, `HarvestUnavailableError`, `ExportError`; messages from safe fields only
-  - [ ] T1.1.3 Tests: repr/str/f-string/`%s`/`logging` of a token never show the value; redaction filter scrubs records from any logger; pickling or `json.dumps` of the token raises
-  - [ ] T1.1.4 Carry-over from the T0.1 gate: add `asyncio_default_fixture_loop_scope = "function"` to `[tool.pytest.ini_options]`; in `tests/test_conftest.py` replace the near-vacuous `"t" not in repr(...)` assertion and make `test_fixture_skips_or_returns` actually request the fixture (or delete it, since `tests/test_live_credentials_secrecy.py` covers leakage)
+- [x] T1.1 Token wrapper, safe errors and log redaction — owner: executor — est: 1h
+  - [x] T1.1.1 `secrets.py`: `HarvestToken` (frozen, `__repr__`/`__str__`/`__format__` → `HarvestToken(***)`, `.reveal()`), `redact(text, token)` replacing the value and `Bearer \S+`, `install_log_redaction(token)` logging filter
+  - [x] T1.1.2 `errors.py`: `ExitArchiveError` base + `AuthError`, `ForbiddenError`, `NotFoundError`, `RateLimitedError`, `HarvestUnavailableError`, `ExportError`; messages from safe fields only
+  - [x] T1.1.3 Tests: repr/str/f-string/`%s`/`logging` of a token never show the value; redaction filter scrubs records from any logger; pickling or `json.dumps` of the token raises
+  - [x] T1.1.4 Carry-over from the T0.1 gate: add `asyncio_default_fixture_loop_scope = "function"` to `[tool.pytest.ini_options]`; in `tests/test_conftest.py` replace the near-vacuous `"t" not in repr(...)` assertion and make `test_fixture_skips_or_returns` actually request the fixture (or delete it, since `tests/test_live_credentials_secrecy.py` covers leakage)
   - Acceptance:
     - `uv run pytest -q tests/test_secrets.py tests/test_errors.py` passes
     - A test logs `f"{token}"`, `repr(token)` and `"Bearer <value>"` through `logging` and asserts the raw value is absent from `caplog.text`
-    - `grep -rn "reveal()" src/` shows calls only inside `src/exit_archive/secrets.py` (definition) at this stage
+    - `grep -rln "\.reveal()" src/` lists only `src/exit_archive/secrets.py` at this stage (the call inside `redact()` is allowed; from T1.2 on, `src/exit_archive/harvest/http.py` is the only other permitted file)
     - `uv run pytest -q -W error::pytest.PytestDeprecationWarning` passes (no asyncio loop-scope warning)
+    - (added after tester FAIL #1) `tests/test_secrets_adversarial.py` passes in full; a malformed log call (`log.warning("%s %s", 1)`) with redaction installed does not raise and still scrubs the token
+    - (added after tester FAIL #1) `vars(token)`, `token.__dict__`, `dataclasses.asdict(token)` raise; setting an attribute raises
+    - (added after tester FAIL #1) `AuthError`/`ForbiddenError`/`NotFoundError`/`RateLimitedError` take no `status_code` argument; only `HarvestUnavailableError` accepts one, limited to 500-599
 - [ ] T1.2 Async Harvest HTTP client — owner: executor — est: 2.5h
   - [ ] T1.2.1 `harvest/http.py`: `HarvestClient` (async context manager) with base headers (`Authorization`, `Harvest-Account-Id`, `User-Agent: ExitArchive/<version>`), httpx timeouts
   - [ ] T1.2.2 Rate limiter: at most 100 requests per rolling 15 s (injectable clock for tests)
@@ -110,6 +113,7 @@ Standing acceptance for every executor task (the tester checks these even when n
   - [ ] T3.1.1 Add runtime deps `fastapi`, `uvicorn[standard]`, `jinja2`, `python-multipart`
   - [ ] T3.1.2 `jobs/store.py`: SQLite at `$DATA_DIR/jobs.sqlite3`, table `jobs(id, checkout_session_id UNIQUE, status, stage, done, total, error, created_at, finished_at, expires_at, archive_path)` — no token column
   - [ ] T3.1.3 `jobs/runner.py`: `submit(token, account_id, session_id) -> job_id` (`secrets.token_urlsafe(32)`), asyncio task under a semaphore (`MAX_CONCURRENT_JOBS`, default 2), progress written to the store, errors stored as safe text via `redact()`, token reference dropped in `finally`; on startup, rows left `running` become `failed` with reason `server_restarted`
+  - [ ] T3.1.5 Concurrent-safe redaction: replace per-token chaining of `install_log_redaction()` with one process-wide redactor holding a set of active tokens (add on job start, remove in `finally`); test two overlapping jobs uninstalling out of order still scrub both tokens
   - [ ] T3.1.4 `jobs/cleanup.py`: sweep at startup and hourly; delete archives with `expires_at < now`, mark `expired`
   - Acceptance:
     - Test: after a job finishes, `jobs.sqlite3` bytes and every file under `$DATA_DIR` do not contain the token string
@@ -117,6 +121,7 @@ Standing acceptance for every executor task (the tester checks these even when n
     - Test: 3 submitted jobs with limit 2 → at most 2 run concurrently
     - Test: an archive with `expires_at` in the past is deleted by the sweep and its row is `expired`; one in the future is kept
     - Test: a `running` row at startup becomes `failed`/`server_restarted`
+    - Test: jobs A and B overlap, A finishes first; a log line containing B's token after that is still scrubbed
 - [ ] T3.2 Web routes and pages — owner: executor — est: 2.5h
   - [ ] T3.2.1 `web/app.py` (FastAPI, Jinja2): `GET /` landing (what you get, $49, privacy summary, Buy button → `STRIPE_PAYMENT_LINK_URL`), `GET /start?session_id=` token form, `POST /jobs` (form: token, optional account_id, session_id) → 303 to `/jobs/{id}`, `GET /jobs/{id}` progress page (meta refresh 3 s), `GET /jobs/{id}/download` (FileResponse; 404 unknown id; 410 expired), `GET /healthz`, `GET /privacy`
   - [ ] T3.2.2 Custom `RequestValidationError` handler that never echoes input; templates never render the token; form uses `autocomplete="off"`

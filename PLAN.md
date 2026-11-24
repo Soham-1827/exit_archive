@@ -13,7 +13,7 @@ Single Python 3.12 package `src/exit_archive/`, one process, one machine.
 
 | Module | Responsibility | May depend on | Must not |
 |---|---|---|---|
-| `secrets.py` | `HarvestToken` wrapper (redacted `repr`/`str`), `redact()` helper, logging filter that scrubs the token value and any `Bearer …` string | stdlib | expose the raw value except via `.reveal()` used only by `harvest/http.py` |
+| `secrets.py` | `HarvestToken` wrapper (redacted `repr`/`str`), `redact()` helper, logging filter that scrubs the token value and any `Bearer …` string | stdlib | expose the raw value except via `.reveal()`, called only by `redact()` in this module and by `harvest/http.py` |
 | `errors.py` | Typed errors (`AuthError`, `NotFoundError`, `RateLimitedError`, `HarvestUnavailableError`, `ExportError`) whose messages are built from safe fields only | stdlib | carry request headers or the token |
 | `harvest/http.py` | Async httpx client: auth headers, `User-Agent`, rate limiter (100 req / 15 s), retry on 429 (`Retry-After`) and 5xx with backoff, error mapping, pagination via `links.next` | `secrets`, `errors`, httpx | log request headers |
 | `harvest/accounts.py` | `GET id.getharvest.com/api/v2/accounts`, keep `product == "harvest"` accounts, pick one | `harvest/http` | — |
@@ -46,7 +46,7 @@ Single Python 3.12 package `src/exit_archive/`, one process, one machine.
 
 ## 4. Token security model
 - **Memory only.** The token exists as a `HarvestToken` object inside one job (or one CLI run). Never written to disk, SQLite, logs, archive files, templates or error messages.
-- **Redacted by type.** `repr()`/`str()`/f-strings of `HarvestToken` give `HarvestToken(***)`. Only `harvest/http.py` calls `.reveal()` to build the header.
+- **Redacted by type.** `repr()`/`str()`/f-strings of `HarvestToken` give `HarvestToken(***)`. Only `secrets.redact()` (to scrub) and `harvest/http.py` (to build the header) call `.reveal()`.
 - **Scrubbed logs.** A logging filter installed at startup replaces the token value and any `Bearer \S+` with `***`. httpx/httpcore loggers stay at WARNING. No `show_locals` tracebacks, no third-party error reporting in the MVP.
 - **Safe exceptions.** Harvest errors become typed errors built only from status code, resource name and a fixed message. The job runner catches everything, stores `type(exc).__name__` + the safe message, and never stores `str()` of an arbitrary exception without passing it through `redact()`.
 - **Web input.** Token only in a POST body; `autocomplete="off"`; never re-rendered into a page; custom 422 handler that never echoes `input`; uvicorn access log has paths only (token never in a path); Origin check on POST.
@@ -101,3 +101,6 @@ File names come from Harvest data, so `archive/writer.py` sanitizes them: allow 
 
 ## 9. Decision log
 - 2026-11-24 — Initial plan (orchestrator, plan mode). CLI-first ordering; Render recommended for hosting pending D1; Stripe Payment Link pending D2. Developer test-token file confirmed to contain the keys `HARVEST_TOKEN` and `HARVEST_ACCOUNT_ID` (names checked, values not read).
+- 2026-11-24 — T1.1 review: `.reveal()` is permitted in exactly two places, `secrets.redact()` (it must know the value to scrub it) and `harvest/http.py` (to build the Authorization header). Any other caller is a review FAIL.
+- 2026-11-24 — T1.1 review: `install_log_redaction()` chains record factories per token; with overlapping web jobs, an out-of-order uninstall would drop another job's redaction. Fine for the single-token CLI; T3.1.5 replaces it with one process-wide redactor over a set of active tokens.
+- 2026-11-24 — T1.1 tester FAIL #1: the redaction hook made malformed log calls raise in the caller; must fall back instead. Also ruled: `HarvestToken` becomes a `__slots__` class (no `__dict__`, so `vars`/`asdict` cannot dump it), and fixed-status errors drop the `status_code` override (only `HarvestUnavailableError` keeps it, for 5xx).

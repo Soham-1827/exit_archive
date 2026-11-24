@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Planning is done and committed (3934f86). T0.1 (uv/Python 3.12 scaffold) passed the tester gate (12 tests, 100 % coverage, ruff/mypy clean) and is being committed now; next is T1.1 (token wrapper, safe errors, log redaction), which also carries two small T0.1 test-hygiene fixes as T1.1.4. The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 27.5 h of the ~28 h budget. Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
+Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (HarvestToken, typed safe errors, log redaction) passed the tester on the second loop (73 tests, 99 % coverage) and is being committed now; next is T1.2 (async Harvest HTTP client). The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 27.5 h of the ~28 h budget. Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
 
 ## What exists
 - `CLAUDE.md` — project rules, commands, verified Harvest API facts
@@ -16,6 +16,9 @@ Planning is done and committed (3934f86). T0.1 (uv/Python 3.12 scaffold) passed 
 - `src/exit_archive/__init__.py` (`__version__`), `cli.py` (`--version` only), `py.typed`
 - `tests/conftest.py` — `harvest_live_credentials` fixture + `load_live_credentials()`; turns the coverage gate off only for `-m live` runs
 - `tests/test_cli.py`, `tests/test_conftest.py`, `tests/test_live_credentials_secrecy.py` — CLI and credential-secrecy tests
+- `src/exit_archive/secrets.py` — `HarvestToken` (slotted, immutable, masked repr/str/format, unpicklable, `reveal()`), `redact()`, `RedactionFilter`, `install_log_redaction()` (record-factory hook, returns uninstall)
+- `src/exit_archive/errors.py` — `ExitArchiveError`, `AuthError` 401, `ForbiddenError` 403, `NotFoundError` 404, `RateLimitedError` 429, `HarvestUnavailableError` 5xx, `ExportError`
+- `tests/test_secrets.py`, `tests/test_errors.py`, `tests/test_secrets_adversarial.py` — token/redaction/error tests incl. tester's adversarial suite
 
 ## How to run, test, deploy
 - Install: `uv sync` (Python 3.12 via `uv python install 3.12` if missing)
@@ -44,9 +47,9 @@ Planning is done and committed (3934f86). T0.1 (uv/Python 3.12 scaffold) passed 
 - D5 Approve privacy/data-handling page wording before launch.
 
 ## Next 3 tasks
-1. T1.1 Token wrapper, safe errors and log redaction, incl. T1.1.4 test-hygiene carry-over (executor)
-2. T1.2 Async Harvest HTTP client (executor)
-3. T1.3 Resource registry and fetchers (executor)
+1. T1.2 Async Harvest HTTP client (executor)
+2. T1.3 Resource registry and fetchers (executor)
+3. T1.4 Archive writer, manifest and zip (executor)
 
 ## Gotchas
 - `~/.harvest_test` is `KEY=VALUE` with keys `HARVEST_TOKEN` and `HARVEST_ACCOUNT_ID` (file mode 600). Only the `live` test fixture reads it; never print it or copy it into the repo or a prompt.
@@ -59,6 +62,9 @@ Planning is done and committed (3934f86). T0.1 (uv/Python 3.12 scaffold) passed 
 - First `uv sync` before `src/` existed left an empty editable install; fix with `uv sync --reinstall-package exit-archive` (fresh clones are fine).
 - `pytest -m live` alone selects no unit tests, so `tests/conftest.py` disables the coverage gate for exactly that mark expression; any other expression keeps the 80 % gate (tester proved it).
 - `tests/__init__.py` exists so tests can `from tests.conftest import load_live_credentials`; keep it, or move the loader into a helper module if it gets in the way.
+- `.reveal()` may be called only in `secrets.redact()` and `harvest/http.py`; anything else fails review (PLAN.md decision log).
+- `install_log_redaction()` stacks one hook per token; overlapping web jobs need the process-wide redactor planned in T3.1.5.
+- The redaction hook runs at record creation, so malformed log calls are caught and turned into a fallback message instead of raising (T1.1 fix loop).
 - Running in WSL on `/mnt/d` (NTFS): file permission bits show as 777; do not rely on chmod in tests.
 
 ## Secrets and where they live
@@ -67,4 +73,4 @@ Planning is done and committed (3934f86). T0.1 (uv/Python 3.12 scaffold) passed 
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED` — config, not secret; names listed in `.env.example` after T0.1/T3.2
 
 ## Last updated
-2026-11-24 — last commit: 3934f86 (chore: scaffold agent pipeline and project plan); T0.1 commit pending
+2026-11-24 — last commit: 5aca471 (chore: set up uv project …); T1.1 commit pending
