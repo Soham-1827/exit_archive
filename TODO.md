@@ -1,0 +1,195 @@
+# TODO
+Legend: [ ] open · [~] in progress · [x] done · [!] blocked
+
+Budget: ~28 h total. Planned: 27.5 h (P0 1 · P1 11 · P2 3 · P3 6.5 · P4 6). Architecture, module names and the token security model are in PLAN.md.
+Standing acceptance for every executor task (the tester checks these even when not repeated): `uv run pytest -q` passes with coverage ≥ 80 %; `uv run ruff check .` and `uv run ruff format --check .` clean; `uv run mypy src` clean; no unit test touches the network (respx/fixtures only); any test that handles a token asserts the token string is absent from outputs and captured logs.
+
+## Phase 0: Project setup — one command installs, lints, type-checks and tests an empty package
+- [ ] T0.1 Scaffold the Python project with uv — owner: executor — est: 1h
+  - [ ] T0.1.1 `uv python pin 3.12` (writes `.python-version`); `pyproject.toml` with hatchling build backend, `requires-python = ">=3.12"`, runtime dep `httpx`, console script `exit-archive = "exit_archive.cli:main"`
+  - [ ] T0.1.2 Dev dependency group: `pytest`, `pytest-cov`, `pytest-asyncio`, `respx`, `ruff`, `mypy`
+  - [ ] T0.1.3 Package layout `src/exit_archive/__init__.py` (`__version__ = "0.1.0"`), `src/exit_archive/cli.py` with `main()` handling only `--version`, `src/exit_archive/py.typed`
+  - [ ] T0.1.4 Tool config in `pyproject.toml`: ruff (line-length 100, rules `E,F,I,B,UP,S,SIM`, `S101` ignored under tests), mypy `strict = true` on `src`, pytest `testpaths = ["tests"]`, `asyncio_mode = "auto"`, marker `live` registered, `addopts = "-m 'not live' --cov=exit_archive --cov-report=term-missing --cov-fail-under=80"`
+  - [ ] T0.1.5 `tests/test_cli.py` covering `--version`; `tests/conftest.py` with a `harvest_live_credentials` fixture that reads `HARVEST_TOKEN` / `HARVEST_ACCOUNT_ID` from the environment or else parses `~/.harvest_test` (`KEY=VALUE` lines), and skips if neither exists
+  - [ ] T0.1.6 `.env.example` with names only (`HARVEST_TOKEN=`), commit `uv.lock`
+  - Acceptance:
+    - `uv sync` exits 0 on a clean clone; `uv run python -c "import sys; print(sys.version_info[:2])"` prints `(3, 12)`
+    - `uv run pytest -q` exits 0, reports ≥ 1 passed, coverage ≥ 80 %
+    - `uv run pytest -q -m live` exits 0 or 5 (no tests collected) and makes no network call
+    - `uv run ruff check .`, `uv run ruff format --check .`, `uv run mypy src` all exit 0
+    - `uv run exit-archive --version` prints `0.1.0`
+    - `uv.lock`, `.python-version`, `.env.example` exist; `.env.example` contains no value after `=`
+    - `git status --porcelain` shows no `.venv/`, caches or `.coverage` (gitignored)
+
+## Phase 1: Core export CLI — `exit-archive export --out DIR` writes a complete archive from the live trial account
+- [ ] T1.1 Token wrapper, safe errors and log redaction — owner: executor — est: 1h
+  - [ ] T1.1.1 `secrets.py`: `HarvestToken` (frozen, `__repr__`/`__str__`/`__format__` → `HarvestToken(***)`, `.reveal()`), `redact(text, token)` replacing the value and `Bearer \S+`, `install_log_redaction(token)` logging filter
+  - [ ] T1.1.2 `errors.py`: `ExitArchiveError` base + `AuthError`, `ForbiddenError`, `NotFoundError`, `RateLimitedError`, `HarvestUnavailableError`, `ExportError`; messages from safe fields only
+  - [ ] T1.1.3 Tests: repr/str/f-string/`%s`/`logging` of a token never show the value; redaction filter scrubs records from any logger; pickling or `json.dumps` of the token raises
+  - Acceptance:
+    - `uv run pytest -q tests/test_secrets.py tests/test_errors.py` passes
+    - A test logs `f"{token}"`, `repr(token)` and `"Bearer <value>"` through `logging` and asserts the raw value is absent from `caplog.text`
+    - `grep -rn "reveal()" src/` shows calls only inside `src/exit_archive/secrets.py` (definition) at this stage
+- [ ] T1.2 Async Harvest HTTP client — owner: executor — est: 2.5h
+  - [ ] T1.2.1 `harvest/http.py`: `HarvestClient` (async context manager) with base headers (`Authorization`, `Harvest-Account-Id`, `User-Agent: ExitArchive/<version>`), httpx timeouts
+  - [ ] T1.2.2 Rate limiter: at most 100 requests per rolling 15 s (injectable clock for tests)
+  - [ ] T1.2.3 Retries: 429 waits `Retry-After` seconds (cap 60 s, max 5 tries); 502/503/504 exponential backoff (max 4 tries); 401 → `AuthError`, 403 → `ForbiddenError`, 404 → `NotFoundError`, exhausted retries → `RateLimitedError` / `HarvestUnavailableError`
+  - [ ] T1.2.4 `paginate(path, key, params)` async iterator following `links.next` until null
+  - [ ] T1.2.5 `harvest/accounts.py`: `discover_accounts(token)` via `https://id.getharvest.com/api/v2/accounts`, filter `product == "harvest"`, `choose_account(accounts, account_id)` (one → it; many without id → `ExportError` listing ids and names; unknown id → `ExportError`)
+  - Acceptance:
+    - respx tests cover: 3-page pagination via `links.next`; 429 with `Retry-After: 2` then 200 (sleep is mocked, asserted called with 2); 503×2 then 200; 503 forever → `HarvestUnavailableError`; 401 → `AuthError`; 404 → `NotFoundError`
+    - A test asserts every request carries `Harvest-Account-Id` and a `User-Agent` starting `ExitArchive/`
+    - A test asserts the rate limiter delays the 101st call inside a 15 s window (fake clock, no real sleep)
+    - Error messages raised in all the above tests do not contain the token (asserted)
+    - Account tests: single, multiple without id, multiple with id, forecast-only account filtered out
+- [ ] T1.3 Resource registry and fetchers — owner: executor — est: 1.5h
+  - [ ] T1.3.1 `harvest/resources.py`: registry (name, path, JSON key, feature flag) for `clients, contacts, projects, tasks, users, user_assignments, task_assignments, time_entries, expense_categories, expenses, invoice_item_categories, invoices, estimate_item_categories, estimates`
+  - [ ] T1.3.2 `fetch_company()` → `base_uri` + feature flags; resources whose flag is false are skipped and reported as skipped
+  - [ ] T1.3.3 `invoice_payments`: `GET /v2/invoices/{id}/payments` per invoice, each payment tagged with `invoice_id`
+  - [ ] T1.3.4 Fixtures in `tests/fixtures/harvest/` (hand-written from the API docs, no real customer data)
+  - Acceptance:
+    - A test asserts the registry contains exactly the 14 resource names above plus `invoice_payments`
+    - With `invoice_feature: false`, a test shows no request to `/v2/invoices` and `invoices` reported skipped
+    - Payments test: 2 invoices → 2 payment requests, payments carry the right `invoice_id`
+- [ ] T1.4 Archive writer, manifest and zip — owner: executor — est: 2h
+  - [ ] T1.4.1 `archive/writer.py`: per-resource streaming JSON array + CSV (flattened dotted columns, UTF-8 with BOM), `safe_name()` (allow `[A-Za-z0-9._-]`, max 100 chars, id prefix), path-inside-work-dir assertion
+  - [ ] T1.4.2 `archive/manifest.py`: counts per type, `files[]` with `path`, `bytes`, `sha256`, `missing[]` with `type`, `id`, `reason`, `skipped[]`, `generated_at`, `tool_version`, account id and company name
+  - [ ] T1.4.3 `archive/zipper.py`: zip work dir as `exit-archive-<company-slug>-<YYYYMMDD>.zip`, remove the work dir; `README.txt` written by the writer
+  - Acceptance:
+    - `safe_name("../../etc/passwd")`, names with `/`, `\`, NUL, 300 chars, and unicode all yield names inside the work dir (parametrized test)
+    - A CSV round-trip test: nested `client.name` becomes a column; a value containing a comma, quote and newline survives `csv.reader`
+    - Manifest test: every file in the work dir except `MANIFEST.json` appears with a correct sha256; counts equal records written
+    - Zip test: the zip contains `MANIFEST.json`, `README.txt`, `data/json/`, `data/csv/`; the work dir is gone afterwards
+- [ ] T1.5 Receipt and PDF downloads — owner: executor — est: 2h
+  - [ ] T1.5.1 `harvest/files.py`: receipt download with Bearer only if the URL host matches `*.harvestapp.com`; redirects followed manually and `Authorization` dropped on any host change
+  - [ ] T1.5.2 Invoice PDF `{base_uri}/client/invoices/{client_key}.pdf` and estimate PDF `{base_uri}/client/estimates/{client_key}.pdf`, both **without** the token; require body starting `%PDF`
+  - [ ] T1.5.3 Concurrency limit 4, per-file size cap 50 MB; every failure becomes a `missing[]` entry with a reason
+  - Acceptance:
+    - respx test: receipt on `x.harvestapp.com` gets `Authorization`; receipt on `evil.example.com` is not requested with the token (recorded missing, reason `host_not_allowed`); a redirect from harvestapp to an S3 host is followed with no `Authorization` header
+    - respx test: PDF requests carry no `Authorization` header
+    - An HTML login page returned instead of a PDF is recorded missing with reason `not_a_pdf`
+    - A 404 on one receipt does not stop the others (test with 3 receipts, 1 failing)
+- [ ] T1.6 Exporter and CLI `export` command — owner: executor — est: 1h
+  - [ ] T1.6.1 `exporter.py`: `export_account(token, out_dir, account_id=None, progress=None) -> ExportResult` wiring T1.2–T1.5; progress callback `(stage, done, total)`; releases the client at the end
+  - [ ] T1.6.2 `cli.py`: `exit-archive export --out DIR [--account-id ID]`; token from `HARVEST_TOKEN` only (no `--token` flag); progress lines on stderr; exit codes 0 ok, 2 usage/missing token, 3 auth error, 4 other export error; installs log redaction
+  - Acceptance:
+    - `HARVEST_TOKEN= uv run exit-archive export --out /tmp/x` exits 2 with a message naming `HARVEST_TOKEN`
+    - `uv run exit-archive export --help` shows `--out` and `--account-id` and no `--token`
+    - An end-to-end respx test of `export_account` on fixtures produces a zip whose manifest counts match the fixtures, and the token string is absent from every byte in the zip and from `caplog` / `capsys`
+    - 401 from discovery → exit code 3, message has no token
+- [ ] T1.7 Live smoke test against the trial account — owner: executor — est: 1h
+  - [ ] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture
+  - [ ] T1.7.2 Report findings in the executor report: estimate PDF URL result, pagination shape seen, any field surprises
+  - Acceptance:
+    - `uv run pytest -m live -q` passes against the trial account
+    - The archive has counts: clients 1, projects 1, time_entries 1, expenses 1, invoices 1; 1 file under `receipts/` whose bytes equal the API's `file_size`; 1 file under `invoices/` starting with `%PDF`
+    - `MANIFEST.json` sha256 values verify (`sha256sum` check in the test)
+    - The token string is absent from every byte of the zip (asserted in the test)
+    - `uv run pytest -q` (default, no live) still makes no network call
+
+## Phase 2: Offline viewer — `index.html` searches and filters everything from `file://` with no network
+- [ ] T2.1 Viewer data bundle — owner: executor — est: 1h
+  - [ ] T2.1.1 `viewer/bundle.py`: write `data/viewer-data.js` = `window.EXIT_ARCHIVE_DATA = {...};` with slim fields: time entries (date, client, project, task, user, hours, notes, billable, invoice id), invoices (number, client, issue/due date, amount, state, pdf path), estimates, expenses (date, client, project, category, amount, notes, receipt path), clients, projects
+  - Acceptance:
+    - Test: the file starts with `window.EXIT_ARCHIVE_DATA = ` and the remainder (minus `;`) parses as JSON
+    - Test: a note containing `</script><img src=x onerror=alert(1)>` is preserved as data (escaped in JSON), and relative paths point to files that exist in the work dir
+- [ ] T2.2 Offline `index.html` viewer — owner: executor — est: 2h
+  - [ ] T2.2.1 `viewer/index.html` template (inline CSS + vanilla JS, packaged with `importlib.resources`), tabs per record type, global text search, filters: client, project, date range, invoice number; paginated table (200 rows/page); links to PDFs and receipts by relative path; totals of hours/amounts for the current filter
+  - [ ] T2.2.2 CSP `<meta>` with `default-src 'none'` and `connect-src 'none'`; pick `script-src`/`style-src`/`img-src` values that still let `data/viewer-data.js` and receipt images load from `file://` in Chromium (the e2e test proves it; `'self'` may not match `file://`); record data rendered with `textContent` only
+  - [ ] T2.2.3 Wire `build_viewer()` into `export_account()`
+  - [ ] T2.2.4 Optional `e2e` pytest marker (skipped by default) with Playwright: open the fixture archive via `file://`, search, filter by client, assert row counts
+  - Acceptance:
+    - Static test: `index.html` contains no `http://` or `https://` in any `src`/`href`, no `fetch(`, no `XMLHttpRequest`, no `innerHTML` assignment
+    - The fixture export zip contains `index.html` and `data/viewer-data.js`, both listed in `MANIFEST.json`
+    - `uv run pytest -m e2e -q` (after `uv run playwright install chromium`) passes: the page loads from `file://`, a search for a fixture note shows exactly 1 row, the XSS fixture note renders as text (no dialog fires)
+
+## Phase 3: Web app — pay, paste token, watch progress, download within 7 days
+- [ ] T3.1 Job store, runner and expiry cleanup — owner: executor — est: 2.5h
+  - [ ] T3.1.1 Add runtime deps `fastapi`, `uvicorn[standard]`, `jinja2`, `python-multipart`
+  - [ ] T3.1.2 `jobs/store.py`: SQLite at `$DATA_DIR/jobs.sqlite3`, table `jobs(id, checkout_session_id UNIQUE, status, stage, done, total, error, created_at, finished_at, expires_at, archive_path)` — no token column
+  - [ ] T3.1.3 `jobs/runner.py`: `submit(token, account_id, session_id) -> job_id` (`secrets.token_urlsafe(32)`), asyncio task under a semaphore (`MAX_CONCURRENT_JOBS`, default 2), progress written to the store, errors stored as safe text via `redact()`, token reference dropped in `finally`; on startup, rows left `running` become `failed` with reason `server_restarted`
+  - [ ] T3.1.4 `jobs/cleanup.py`: sweep at startup and hourly; delete archives with `expires_at < now`, mark `expired`
+  - Acceptance:
+    - Test: after a job finishes, `jobs.sqlite3` bytes and every file under `$DATA_DIR` do not contain the token string
+    - Test: a job whose export raises an exception containing the token stores an error without the token
+    - Test: 3 submitted jobs with limit 2 → at most 2 run concurrently
+    - Test: an archive with `expires_at` in the past is deleted by the sweep and its row is `expired`; one in the future is kept
+    - Test: a `running` row at startup becomes `failed`/`server_restarted`
+- [ ] T3.2 Web routes and pages — owner: executor — est: 2.5h
+  - [ ] T3.2.1 `web/app.py` (FastAPI, Jinja2): `GET /` landing (what you get, $49, privacy summary, Buy button → `STRIPE_PAYMENT_LINK_URL`), `GET /start?session_id=` token form, `POST /jobs` (form: token, optional account_id, session_id) → 303 to `/jobs/{id}`, `GET /jobs/{id}` progress page (meta refresh 3 s), `GET /jobs/{id}/download` (FileResponse; 404 unknown id; 410 expired), `GET /healthz`, `GET /privacy`
+  - [ ] T3.2.2 Custom `RequestValidationError` handler that never echoes input; templates never render the token; form uses `autocomplete="off"`
+  - [ ] T3.2.3 Lifespan: init store, mark stale jobs, start cleanup loop; configuration from env (`DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`, `STRIPE_PAYMENT_LINK_URL`, `STRIPE_SECRET_KEY`, `PUBLIC_BASE_URL`) with startup validation; documented in `.env.example` (names only)
+  - Acceptance:
+    - TestClient flow with a stubbed exporter: POST `/jobs` → 303 → progress page shows `done` → download returns a zip with `application/zip`
+    - Test: POST `/jobs` with a missing field returns 4xx whose body does not contain the submitted token
+    - Test: no response body from any route contains the submitted token
+    - Test: `/jobs/<unknown>` → 404; expired job download → 410
+    - Test: `GET /?token=x` style query strings are never used — grep of templates shows the token field only inside a `method="post"` form
+    - `uv run uvicorn exit_archive.web.app:app` starts with `PAYMENT_REQUIRED=false DATA_DIR=./tmp` and `GET /healthz` returns 200
+- [ ] T3.3 Stripe payment gate — owner: executor — est: 1.5h
+  - [ ] T3.3.1 `payments.py`: `verify_session(session_id)` → `GET https://api.stripe.com/v1/checkout/sessions/{id}` with `STRIPE_SECRET_KEY`; valid only if `payment_status == "paid"`; session id format checked (`cs_` prefix, length cap) before any request
+  - [ ] T3.3.2 One job per paid session: a session with a `done` or `running` job is refused; a session whose job `failed` may submit again
+  - [ ] T3.3.3 `PAYMENT_REQUIRED=false` bypass for local dev and tests; startup fails if `PAYMENT_REQUIRED=true` and the key is missing
+  - Acceptance:
+    - respx tests: paid → accepted; unpaid → 402 page; unknown session (Stripe 404) → 402; malformed id → 400 with no Stripe call
+    - Test: second submit on a session with a `done` job → refused; after a `failed` job → accepted
+    - Test: the Stripe key never appears in logs (`caplog`) or responses
+
+## Phase 4: Ship — container, CI, hardening, hosting, launch check
+- [ ] T4.1 Dockerfile and .dockerignore — owner: deployer — est: 1h
+  - [ ] T4.1.1 Multi-stage build on a pinned `python:3.12-slim` digest with uv, non-root user, `DATA_DIR=/data` volume, `HEALTHCHECK` on `/healthz`, single uvicorn worker, `--proxy-headers`, no secrets baked in
+  - Acceptance:
+    - `docker build -t exit-archive .` succeeds (or, if the daemon is down, the report says so and `hadolint`-style review is attached)
+    - `docker run --rm -e PAYMENT_REQUIRED=false -p 8000:8000 exit-archive` then `curl -fsS localhost:8000/healthz` returns 200
+    - `docker run --rm exit-archive id -u` is not `0`
+    - `.dockerignore` excludes `.git`, `.venv`, `.env*`, `tests`, caches
+- [ ] T4.2 GitHub Actions CI — owner: deployer — est: 1h
+  - [ ] T4.2.1 `.github/workflows/ci.yml` on push and PR: `astral-sh/setup-uv` pinned, `uv sync --frozen`, ruff check, ruff format --check, mypy, pytest (coverage gate), `docker build`; actions pinned to versions; no secrets needed
+  - Acceptance:
+    - YAML validates (`uv run python -c "import yaml,sys; yaml.safe_load(open('.github/workflows/ci.yml'))"` or equivalent)
+    - After the main session pushes, the latest workflow run is green: `curl -s "https://api.github.com/repos/Soham-1827/exit_archive/actions/runs?per_page=1"` shows `"conclusion": "success"` (public repo; `gh` is not installed), or the user confirms on the Actions page if the repo is private
+    - Live tests are not run in CI (`-m 'not live'` default)
+- [ ] T4.3 Production hardening — owner: deployer — est: 1.5h
+  - [ ] T4.3.1 `web/security.py`: headers on every response — CSP `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; form-action 'self'; frame-ancestors 'none'; base-uri 'none'; object-src 'none'`, HSTS `max-age=31536000; includeSubDomains`, `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: no-referrer`, `Permissions-Policy: camera=(), microphone=(), geolocation=()`, `Cache-Control: no-store` on job pages and downloads
+  - [ ] T4.3.2 Request body limit 16 KB on POST routes; per-IP rate limit on `POST /jobs` (5 per 10 min, in memory, honoring the proxy's client IP); Origin/Referer must match `PUBLIC_BASE_URL` on POST
+  - [ ] T4.3.3 Logging config: uvicorn access log without query strings; redaction filter installed at startup; httpx loggers at WARNING
+  - Acceptance:
+    - TestClient test asserts each header above on `/`, `/jobs/{id}` and the download route
+    - Test: 20 KB POST → 413; 6th POST from one IP in 10 min → 429; POST with a foreign Origin → 403
+    - `uv run pytest -q` still passes with coverage ≥ 80 %
+- [ ] T4.4 docs/DEPLOY.md (platform-neutral part) — owner: deployer — est: 0.5h
+  - [ ] T4.4.1 Env var table (names, purpose, required/optional), how to run the container locally, how to rotate `STRIPE_SECRET_KEY`, how to read logs, how to roll back to the previous image, the 7-day expiry and disk sizing
+  - Acceptance:
+    - `docs/DEPLOY.md` exists and lists every env var name read by `src/` (checked with `grep -rhoE "os\.environ(\.get)?\[?\(?\"[A-Z_]+" src/` against the table)
+    - Contains no secret values
+- [!] T4.5 Hosting config and first deploy — owner: deployer — est: 1h — blocked on D1 (hosting) and the user's yes to create paid resources
+  - [ ] T4.5.1 `render.yaml` (or `fly.toml`): one web service from the Dockerfile, persistent disk at `/data` (10 GB), health check `/healthz`, env vars by name with `sync: false` for secrets, single instance
+  - [ ] T4.5.2 Add the platform section to `docs/DEPLOY.md`; prepare the exact create/deploy commands and wait for the user's approval before running them
+  - Acceptance:
+    - Config file validates with the platform's validator or schema (or is reviewed line by line in the report if no validator is available offline)
+    - After approval: `curl -fsSI https://<host>/` shows HTTPS 200 and every header from T4.3; `http://` redirects to `https://`
+    - No secret value in the config file (`grep -iE "sk_|rk_|pt\." render.yaml fly.toml` finds nothing)
+- [ ] T4.6 Launch readiness — owner: deployer — est: 1h — needs T4.5 and D2
+  - [ ] T4.6.1 On the deployed app with Stripe **test mode**: buy via the test Payment Link, paste the trial token, wait for done, download, open `index.html` from disk, verify `MANIFEST.json` checksums
+  - [ ] T4.6.2 Checklist in `docs/LAUNCH.md`: token absent from host logs for that run (log search for the token's last 6 chars run by the user, not printed), archive deleted after expiry (force-expire one job and run the sweep), second submit on a used session refused, privacy page approved (D5), live Stripe keys set only after the user's yes
+  - Acceptance:
+    - `docs/LAUNCH.md` exists with every checklist item marked pass/fail and the evidence (command or screenshot path)
+    - The downloaded zip's manifest counts equal the T1.7 live counts
+    - Zero failed items, or each failure has a TODO task created by the orchestrator
+
+## Later
+- Large-account test (10+ years, 50k+ time entries): measure rate-limit behaviour, memory peak and runtime; tune `MAX_CONCURRENT_JOBS` and instance size
+- Email the download link (needs an email provider) instead of "keep this page open/bookmark it"
+- $79 agency tier (> 5 users) via a second Payment Link
+- S3-compatible storage with lifecycle expiry if we ever run more than one instance
+- Landing page design pass and copy test; analytics (privacy-preserving)
+- Resume a failed job without re-fetching everything
+- Harvest Reports API extras (project budget, uninvoiced) if buyers ask
+- Cross-browser e2e (Firefox, Safari) for the offline viewer
+- Error monitoring with token scrubbing (Sentry `before_send`) once traffic justifies it
+- More repriced vendors (FreshBooks, HoneyBook) — the brief's growth path
+
+## Blocked / needs the user
+- D1 Hosting platform (recommended: Render Starter + 10 GB disk ≈ $10/mo) — blocks T4.5, T4.6
+- D2 Payments (recommended: Stripe Payment Link at $49; you need a Stripe account, a product, a Payment Link with success URL `https://<host>/start?session_id={CHECKOUT_SESSION_ID}`, and a restricted key with Checkout Sessions read) — blocks live keys in T4.6
+- D3 Domain (optional) · D4 multi-account behaviour (recommendation in PLAN.md) · D5 approve privacy page wording before launch

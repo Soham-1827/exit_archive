@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+*.egg-info/
+
+# Secrets and local data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+.harvest_test
+archives/
+data/
+tmp/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
