@@ -1,7 +1,7 @@
 # TODO
 Legend: [ ] open · [~] in progress · [x] done · [!] blocked
 
-Budget: ~28 h total. Planned: 27.5 h (P0 1 · P1 11 · P2 3 · P3 6.5 · P4 6). Architecture, module names and the token security model are in PLAN.md.
+Budget: ~28 h total. Planned: 28 h (P0 1 · P1 11.5 · P2 3 · P3 6.5 · P4 6). Architecture, module names and the token security model are in PLAN.md.
 Standing acceptance for every executor task (the tester checks these even when not repeated): `uv run pytest -q` passes with coverage ≥ 80 %; `uv run ruff check .` and `uv run ruff format --check .` clean; `uv run mypy src` clean; no unit test touches the network (respx/fixtures only); any test that handles a token asserts the token string is absent from outputs and captured logs.
 
 ## Phase 0: Project setup — one command installs, lints, type-checks and tests an empty package
@@ -49,41 +49,49 @@ Standing acceptance for every executor task (the tester checks these even when n
     - Account tests: single, multiple without id, multiple with id, forecast-only account filtered out
     - (added after tester FAIL #1) `tests/harvest/test_http_adversarial.py` passes in full: links with a different scheme, host or port are refused before any request (`ExportError`, no token sent); a `links.next` cycle raises `ExportError` instead of looping; a 3xx response raises an `ExportError` naming the redirect status
     - (moved here from T1.3.5) 500 then 200 succeeds after one backoff; 500 forever → `HarvestUnavailableError` with `status_code == 500`
-- [ ] T1.3 Resource registry and fetchers — owner: executor — est: 1.5h
-  - [ ] T1.3.1 `harvest/resources.py`: registry (name, path, JSON key, feature flag) for `clients, contacts, projects, tasks, users, user_assignments, task_assignments, time_entries, expense_categories, expenses, invoice_item_categories, invoices, estimate_item_categories, estimates`
-  - [ ] T1.3.2 `fetch_company()` → `base_uri` + feature flags; resources whose flag is false are skipped and reported as skipped
-  - [ ] T1.3.3 `invoice_payments`: `GET /v2/invoices/{id}/payments` per invoice, each payment tagged with `invoice_id`
-  - [ ] T1.3.4 Fixtures in `tests/fixtures/harvest/` (hand-written from the API docs, no real customer data)
+- [x] T1.3 Resource registry and fetchers — owner: executor — est: 1.5h
+  - [x] T1.3.1 `harvest/resources.py`: registry (name, path, JSON key, feature flag) for `clients, contacts, projects, tasks, users, user_assignments, task_assignments, time_entries, expense_categories, expenses, invoice_item_categories, invoices, estimate_item_categories, estimates`
+  - [x] T1.3.2 `fetch_company()` → `base_uri` + feature flags; resources whose flag is false are skipped and reported as skipped
+  - [x] T1.3.3 `invoice_payments`: `GET /v2/invoices/{id}/payments` per invoice, each payment tagged with `invoice_id`
+  - [x] T1.3.4 Fixtures in `tests/fixtures/harvest/` (hand-written from the API docs, no real customer data)
   - Acceptance:
     - A test asserts the registry contains exactly the 14 resource names above plus `invoice_payments`
     - With `invoice_feature: false`, a test shows no request to `/v2/invoices` and `invoices` reported skipped
     - Payments test: 2 invoices → 2 payment requests, payments carry the right `invoice_id`
 - [ ] T1.4 Archive writer, manifest and zip — owner: executor — est: 2h
   - [ ] T1.4.1 `archive/writer.py`: per-resource streaming JSON array + CSV (flattened dotted columns, UTF-8 with BOM), `safe_name()` (allow `[A-Za-z0-9._-]`, max 100 chars, id prefix), path-inside-work-dir assertion
+  - [ ] T1.4.1a Input is `iter_all()`'s interleaved `(name, record)` stream (invoice payments arrive between invoices): keep one lazily opened stream per resource name, never assume records are grouped, close all at the end. CSV columns vary per record, so first stream each record to `<resource>.jsonl` in a temp area while collecting the union of flattened column names, then write the CSV in a second pass over the JSONL line by line (memory stays per-record); the JSON array file is written in the first pass. Temp JSONL is deleted before zipping.
   - [ ] T1.4.2 `archive/manifest.py`: counts per type, `files[]` with `path`, `bytes`, `sha256`, `missing[]` with `type`, `id`, `reason`, `skipped[]`, `generated_at`, `tool_version`, account id and company name
   - [ ] T1.4.3 `archive/zipper.py`: zip work dir as `exit-archive-<company-slug>-<YYYYMMDD>.zip`, remove the work dir; `README.txt` written by the writer
   - Acceptance:
     - `safe_name("../../etc/passwd")`, names with `/`, `\`, NUL, 300 chars, and unicode all yield names inside the work dir (parametrized test)
     - A CSV round-trip test: nested `client.name` becomes a column; a value containing a comma, quote and newline survives `csv.reader`
     - Manifest test: every file in the work dir except `MANIFEST.json` appears with a correct sha256; counts equal records written
+    - Interleaving test: `invoices, invoice_payments, invoices, invoice_payments` input yields correct, complete JSON and CSV for both; records with different nested keys produce one CSV whose header is the union, missing cells empty
+    - An empty resource produces `[]` JSON and a CSV with no rows; no `.jsonl` file remains in the archive
     - Zip test: the zip contains `MANIFEST.json`, `README.txt`, `data/json/`, `data/csv/`; the work dir is gone afterwards
 - [ ] T1.5 Receipt and PDF downloads — owner: executor — est: 2h
   - [ ] T1.5.1 `harvest/files.py`: receipt download with Bearer only if the URL host matches `*.harvestapp.com`; redirects followed manually and `Authorization` dropped on any host change
   - [ ] T1.5.2 Invoice PDF `{base_uri}/client/invoices/{client_key}.pdf` and estimate PDF `{base_uri}/client/estimates/{client_key}.pdf`, both **without** the token; require body starting `%PDF`
+  - [ ] T1.5.2a Validate `company.base_uri` before building any PDF URL: scheme `https` and host equal to `harvestapp.com` or ending in `.harvestapp.com` (dot-anchored suffix, no userinfo, default port); otherwise every invoice/estimate PDF is recorded missing with reason `base_uri_not_allowed` and no request is made
   - [ ] T1.5.3 Concurrency limit 4, per-file size cap 50 MB; every failure becomes a `missing[]` entry with a reason
   - Acceptance:
     - respx test: receipt on `x.harvestapp.com` gets `Authorization`; receipt on `evil.example.com` is not requested with the token (recorded missing, reason `host_not_allowed`); a redirect from harvestapp to an S3 host is followed with no `Authorization` header
     - respx test: PDF requests carry no `Authorization` header
     - An HTML login page returned instead of a PDF is recorded missing with reason `not_a_pdf`
     - A 404 on one receipt does not stop the others (test with 3 receipts, 1 failing)
-- [ ] T1.6 Exporter and CLI `export` command — owner: executor — est: 1h
+    - (from T1.3 gate) `base_uri` values `http://acme.harvestapp.com`, `https://evil.example.com`, `https://harvestapp.com.evil.com`, `https://x@acme.harvestapp.com`, `javascript:alert(1)` and `""` each produce zero PDF requests and `base_uri_not_allowed` entries; `https://acme.harvestapp.com` works
+- [ ] T1.6 Exporter and CLI `export` command — owner: executor — est: 1.5h
   - [ ] T1.6.1 `exporter.py`: `export_account(token, out_dir, account_id=None, progress=None) -> ExportResult` wiring T1.2–T1.5; progress callback `(stage, done, total)`; releases the client at the end
+  - [ ] T1.6.1a (from T1.3 gate) In `harvest/resources.py`: a `NotFoundError` or `ForbiddenError` on one invoice's payments is recorded as `missing[]` (`type: invoice_payments`, `id: <invoice id>`, reason `not_found`/`forbidden`) via a callback or result object, and the export continues; `AuthError`, `RateLimitedError` and `HarvestUnavailableError` still abort. Invoice ids < 1 are rejected with `ExportError` before any request
   - [ ] T1.6.2 `cli.py`: `exit-archive export --out DIR [--account-id ID]`; token from `HARVEST_TOKEN` only (no `--token` flag); progress lines on stderr; exit codes 0 ok, 2 usage/missing token, 3 auth error, 4 other export error; installs log redaction
   - Acceptance:
     - `HARVEST_TOKEN= uv run exit-archive export --out /tmp/x` exits 2 with a message naming `HARVEST_TOKEN`
     - `uv run exit-archive export --help` shows `--out` and `--account-id` and no `--token`
     - An end-to-end respx test of `export_account` on fixtures produces a zip whose manifest counts match the fixtures, and the token string is absent from every byte in the zip and from `caplog` / `capsys`
     - 401 from discovery → exit code 3, message has no token
+    - (from T1.3 gate) payments 404 for invoice 1 of 2: export completes, invoice 2's payments and all later resources are present, `MANIFEST.missing` has one `invoice_payments` entry for invoice 1; a 401 mid-export still aborts with exit code 3
+    - (from T1.3 gate) invoice id `0` or `-5` → `ExportError`, zero payment requests
 - [ ] T1.7 Live smoke test against the trial account — owner: executor — est: 1h
   - [ ] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture
   - [ ] T1.7.2 Report findings in the executor report: estimate PDF URL result, pagination shape seen, any field surprises

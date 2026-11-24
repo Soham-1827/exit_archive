@@ -1,0 +1,22 @@
+{
+  "invoice_payments": [
+    {
+      "id": 5001,
+      "amount": 100.0,
+      "paid_at": "2026-01-01T00:00:00Z",
+      "notes": "fake"
+    }
+  ],
+  "per_page": 2000,
+  "total_pages": 1,
+  "total_entries": 1,
+  "next_page": null,
+  "previous_page": null,
+  "page": 1,
+  "links": {
+    "first": "",
+    "next": null,
+    "previous": null,
+    "last": ""
+  }
+}

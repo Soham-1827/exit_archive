@@ -1,0 +1,9 @@
+{
+  "base_uri": "https://fake-co.harvestapp.com",
+  "full_domain": "fake-co.harvestapp.com",
+  "name": "Fake Co",
+  "is_active": true,
+  "invoice_feature": true,
+  "estimate_feature": true,
+  "expense_feature": true
+}

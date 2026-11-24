@@ -1,0 +1,24 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "name": "users sample 1"
+    },
+    {
+      "id": 2,
+      "name": "users sample 2"
+    }
+  ],
+  "per_page": 2000,
+  "total_pages": 1,
+  "total_entries": 2,
+  "next_page": null,
+  "previous_page": null,
+  "page": 1,
+  "links": {
+    "first": "https://api.harvestapp.com/v2/users?page=1&per_page=2000",
+    "next": null,
+    "previous": null,
+    "last": "https://api.harvestapp.com/v2/users?page=1&per_page=2000"
+  }
+}

@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token type, safe errors, log redaction) committed (bd88a39). T1.2 (async Harvest HTTP client: rate limit, retries, origin guard, pagination, account discovery) passed the tester on the second loop (170 tests, 99.7 % coverage) and is being committed now; next is T1.3 (resource registry and fetchers). The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 27.5 h of the ~28 h budget. Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
+Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token type, safe errors, log redaction) committed (bd88a39). T1.2 (async Harvest HTTP client) committed (04ca4f6). T1.3 (resource registry, company flags, streaming `iter_all()` with interleaved invoice payments) passed the tester first time (221 tests, 99.7 % coverage) and is being committed now; next is T1.4 (archive writer, manifest, zip). The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 28 h of the ~28 h budget (T1.6 grew by 0.5 h for hardening from the T1.3 gate). Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
 
 ## What exists
 - `CLAUDE.md` — project rules, commands, verified Harvest API facts
@@ -22,6 +22,8 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - `src/exit_archive/harvest/http.py` — `HarvestClient` (headers, 100 req/15 s `RateLimiter`, retries on 429/500/502/503/504/transport errors, 3xx → error, same-origin guard on every URL, `paginate()` with loop guard and `MAX_PAGES`)
 - `src/exit_archive/harvest/accounts.py` — `discover_accounts()` (Harvest-only), `choose_account()`
 - `tests/harvest/test_http.py`, `test_accounts.py`, `test_http_adversarial.py` — respx tests incl. tester's adversarial suite
+- `src/exit_archive/harvest/resources.py` — `RESOURCES` registry (14), `fetch_company()` → `Company`, `skipped_resources()`, `iter_resource()`, `iter_invoice_payments()`, `iter_all()` (streams `(name, record)`, payments right after their invoice)
+- `tests/harvest/test_resources.py`, `test_resources_adversarial.py`, `tests/fixtures/harvest/*.json` (17 hand-written fixtures, example-domain data only)
 
 ## How to run, test, deploy
 - Install: `uv sync` (Python 3.12 via `uv python install 3.12` if missing)
@@ -50,9 +52,9 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - D5 Approve privacy/data-handling page wording before launch.
 
 ## Next 3 tasks
-1. T1.3 Resource registry and fetchers (executor)
-2. T1.4 Archive writer, manifest and zip (executor)
-3. T1.5 Receipt and PDF downloads (executor)
+1. T1.4 Archive writer, manifest and zip (executor) — note T1.4.1a: interleaved input, two-pass CSV via temp JSONL
+2. T1.5 Receipt and PDF downloads (executor) — includes the `base_uri` guard T1.5.2a
+3. T1.6 Exporter and CLI (executor) — includes payments-404 tolerance and invoice-id check T1.6.1a
 
 ## Gotchas
 - `~/.harvest_test` is `KEY=VALUE` with keys `HARVEST_TOKEN` and `HARVEST_ACCOUNT_ID` (file mode 600). Only the `live` test fixture reads it; never print it or copy it into the repo or a prompt.
@@ -70,6 +72,8 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - The redaction hook runs at record creation, so malformed log calls are caught and turned into a fallback message instead of raising (T1.1 fix loop).
 - Use `uv run --offline …` in this environment: plain `uv run` stalled > 120 s re-resolving (seen in T1.2). Run plain `uv sync` only when dependencies change.
 - `HarvestClient` refuses any URL whose origin (scheme, host, port) differs from its base URL, so receipts on other hosts in T1.5 need a separate client or a deliberate allow-list design, never a bypass of this guard.
+- `company.base_uri` comes from a Harvest response and is not validated in `resources.py`; T1.5.2a must validate it before building PDF URLs.
+- Today a payments 404 on one invoice aborts the whole export; T1.6.1a fixes it.
 - Running in WSL on `/mnt/d` (NTFS): file permission bits show as 777; do not rely on chmod in tests.
 
 ## Secrets and where they live
@@ -78,4 +82,4 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED` — config, not secret; names listed in `.env.example` after T0.1/T3.2
 
 ## Last updated
-2026-11-24 — last commit: bd88a39 (feat: add redacted Harvest token type …); T1.2 commit pending
+2026-11-24 — last commit: 04ca4f6 (feat: add async Harvest HTTP client …); T1.3 commit pending
