@@ -35,18 +35,20 @@ Standing acceptance for every executor task (the tester checks these even when n
     - (added after tester FAIL #1) `tests/test_secrets_adversarial.py` passes in full; a malformed log call (`log.warning("%s %s", 1)`) with redaction installed does not raise and still scrubs the token
     - (added after tester FAIL #1) `vars(token)`, `token.__dict__`, `dataclasses.asdict(token)` raise; setting an attribute raises
     - (added after tester FAIL #1) `AuthError`/`ForbiddenError`/`NotFoundError`/`RateLimitedError` take no `status_code` argument; only `HarvestUnavailableError` accepts one, limited to 500-599
-- [ ] T1.2 Async Harvest HTTP client — owner: executor — est: 2.5h
-  - [ ] T1.2.1 `harvest/http.py`: `HarvestClient` (async context manager) with base headers (`Authorization`, `Harvest-Account-Id`, `User-Agent: ExitArchive/<version>`), httpx timeouts
-  - [ ] T1.2.2 Rate limiter: at most 100 requests per rolling 15 s (injectable clock for tests)
-  - [ ] T1.2.3 Retries: 429 waits `Retry-After` seconds (cap 60 s, max 5 tries); 502/503/504 exponential backoff (max 4 tries); 401 → `AuthError`, 403 → `ForbiddenError`, 404 → `NotFoundError`, exhausted retries → `RateLimitedError` / `HarvestUnavailableError`
-  - [ ] T1.2.4 `paginate(path, key, params)` async iterator following `links.next` until null
-  - [ ] T1.2.5 `harvest/accounts.py`: `discover_accounts(token)` via `https://id.getharvest.com/api/v2/accounts`, filter `product == "harvest"`, `choose_account(accounts, account_id)` (one → it; many without id → `ExportError` listing ids and names; unknown id → `ExportError`)
+- [x] T1.2 Async Harvest HTTP client — owner: executor — est: 2.5h
+  - [x] T1.2.1 `harvest/http.py`: `HarvestClient` (async context manager) with base headers (`Authorization`, `Harvest-Account-Id`, `User-Agent: ExitArchive/<version>`), httpx timeouts
+  - [x] T1.2.2 Rate limiter: at most 100 requests per rolling 15 s (injectable clock for tests)
+  - [x] T1.2.3 Retries: 429 waits `Retry-After` seconds (cap 60 s, max 5 tries); 502/503/504 exponential backoff (max 4 tries); 401 → `AuthError`, 403 → `ForbiddenError`, 404 → `NotFoundError`, exhausted retries → `RateLimitedError` / `HarvestUnavailableError`
+  - [x] T1.2.4 `paginate(path, key, params)` async iterator following `links.next` until null
+  - [x] T1.2.5 `harvest/accounts.py`: `discover_accounts(token)` via `https://id.getharvest.com/api/v2/accounts`, filter `product == "harvest"`, `choose_account(accounts, account_id)` (one → it; many without id → `ExportError` listing ids and names; unknown id → `ExportError`)
   - Acceptance:
     - respx tests cover: 3-page pagination via `links.next`; 429 with `Retry-After: 2` then 200 (sleep is mocked, asserted called with 2); 503×2 then 200; 503 forever → `HarvestUnavailableError`; 401 → `AuthError`; 404 → `NotFoundError`
     - A test asserts every request carries `Harvest-Account-Id` and a `User-Agent` starting `ExitArchive/`
     - A test asserts the rate limiter delays the 101st call inside a 15 s window (fake clock, no real sleep)
     - Error messages raised in all the above tests do not contain the token (asserted)
     - Account tests: single, multiple without id, multiple with id, forecast-only account filtered out
+    - (added after tester FAIL #1) `tests/harvest/test_http_adversarial.py` passes in full: links with a different scheme, host or port are refused before any request (`ExportError`, no token sent); a `links.next` cycle raises `ExportError` instead of looping; a 3xx response raises an `ExportError` naming the redirect status
+    - (moved here from T1.3.5) 500 then 200 succeeds after one backoff; 500 forever → `HarvestUnavailableError` with `status_code == 500`
 - [ ] T1.3 Resource registry and fetchers — owner: executor — est: 1.5h
   - [ ] T1.3.1 `harvest/resources.py`: registry (name, path, JSON key, feature flag) for `clients, contacts, projects, tasks, users, user_assignments, task_assignments, time_entries, expense_categories, expenses, invoice_item_categories, invoices, estimate_item_categories, estimates`
   - [ ] T1.3.2 `fetch_company()` → `base_uri` + feature flags; resources whose flag is false are skipped and reported as skipped
