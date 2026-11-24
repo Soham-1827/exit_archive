@@ -5,13 +5,13 @@ Budget: ~28 h total. Planned: 27.5 h (P0 1 · P1 11 · P2 3 · P3 6.5 · P4 6). 
 Standing acceptance for every executor task (the tester checks these even when not repeated): `uv run pytest -q` passes with coverage ≥ 80 %; `uv run ruff check .` and `uv run ruff format --check .` clean; `uv run mypy src` clean; no unit test touches the network (respx/fixtures only); any test that handles a token asserts the token string is absent from outputs and captured logs.
 
 ## Phase 0: Project setup — one command installs, lints, type-checks and tests an empty package
-- [ ] T0.1 Scaffold the Python project with uv — owner: executor — est: 1h
-  - [ ] T0.1.1 `uv python pin 3.12` (writes `.python-version`); `pyproject.toml` with hatchling build backend, `requires-python = ">=3.12"`, runtime dep `httpx`, console script `exit-archive = "exit_archive.cli:main"`
-  - [ ] T0.1.2 Dev dependency group: `pytest`, `pytest-cov`, `pytest-asyncio`, `respx`, `ruff`, `mypy`
-  - [ ] T0.1.3 Package layout `src/exit_archive/__init__.py` (`__version__ = "0.1.0"`), `src/exit_archive/cli.py` with `main()` handling only `--version`, `src/exit_archive/py.typed`
-  - [ ] T0.1.4 Tool config in `pyproject.toml`: ruff (line-length 100, rules `E,F,I,B,UP,S,SIM`, `S101` ignored under tests), mypy `strict = true` on `src`, pytest `testpaths = ["tests"]`, `asyncio_mode = "auto"`, marker `live` registered, `addopts = "-m 'not live' --cov=exit_archive --cov-report=term-missing --cov-fail-under=80"`
-  - [ ] T0.1.5 `tests/test_cli.py` covering `--version`; `tests/conftest.py` with a `harvest_live_credentials` fixture that reads `HARVEST_TOKEN` / `HARVEST_ACCOUNT_ID` from the environment or else parses `~/.harvest_test` (`KEY=VALUE` lines), and skips if neither exists
-  - [ ] T0.1.6 `.env.example` with names only (`HARVEST_TOKEN=`), commit `uv.lock`
+- [x] T0.1 Scaffold the Python project with uv — owner: executor — est: 1h
+  - [x] T0.1.1 `uv python pin 3.12` (writes `.python-version`); `pyproject.toml` with hatchling build backend, `requires-python = ">=3.12"`, runtime dep `httpx`, console script `exit-archive = "exit_archive.cli:main"`
+  - [x] T0.1.2 Dev dependency group: `pytest`, `pytest-cov`, `pytest-asyncio`, `respx`, `ruff`, `mypy`
+  - [x] T0.1.3 Package layout `src/exit_archive/__init__.py` (`__version__ = "0.1.0"`), `src/exit_archive/cli.py` with `main()` handling only `--version`, `src/exit_archive/py.typed`
+  - [x] T0.1.4 Tool config in `pyproject.toml`: ruff (line-length 100, rules `E,F,I,B,UP,S,SIM`, `S101` ignored under tests), mypy `strict = true` on `src`, pytest `testpaths = ["tests"]`, `asyncio_mode = "auto"`, marker `live` registered, `addopts = "-m 'not live' --cov=exit_archive --cov-report=term-missing --cov-fail-under=80"`
+  - [x] T0.1.5 `tests/test_cli.py` covering `--version`; `tests/conftest.py` with a `harvest_live_credentials` fixture that reads `HARVEST_TOKEN` / `HARVEST_ACCOUNT_ID` from the environment or else parses `~/.harvest_test` (`KEY=VALUE` lines), and skips if neither exists
+  - [x] T0.1.6 `.env.example` with names only (`HARVEST_TOKEN=`), commit `uv.lock`
   - Acceptance:
     - `uv sync` exits 0 on a clean clone; `uv run python -c "import sys; print(sys.version_info[:2])"` prints `(3, 12)`
     - `uv run pytest -q` exits 0, reports ≥ 1 passed, coverage ≥ 80 %
@@ -26,10 +26,12 @@ Standing acceptance for every executor task (the tester checks these even when n
   - [ ] T1.1.1 `secrets.py`: `HarvestToken` (frozen, `__repr__`/`__str__`/`__format__` → `HarvestToken(***)`, `.reveal()`), `redact(text, token)` replacing the value and `Bearer \S+`, `install_log_redaction(token)` logging filter
   - [ ] T1.1.2 `errors.py`: `ExitArchiveError` base + `AuthError`, `ForbiddenError`, `NotFoundError`, `RateLimitedError`, `HarvestUnavailableError`, `ExportError`; messages from safe fields only
   - [ ] T1.1.3 Tests: repr/str/f-string/`%s`/`logging` of a token never show the value; redaction filter scrubs records from any logger; pickling or `json.dumps` of the token raises
+  - [ ] T1.1.4 Carry-over from the T0.1 gate: add `asyncio_default_fixture_loop_scope = "function"` to `[tool.pytest.ini_options]`; in `tests/test_conftest.py` replace the near-vacuous `"t" not in repr(...)` assertion and make `test_fixture_skips_or_returns` actually request the fixture (or delete it, since `tests/test_live_credentials_secrecy.py` covers leakage)
   - Acceptance:
     - `uv run pytest -q tests/test_secrets.py tests/test_errors.py` passes
     - A test logs `f"{token}"`, `repr(token)` and `"Bearer <value>"` through `logging` and asserts the raw value is absent from `caplog.text`
     - `grep -rn "reveal()" src/` shows calls only inside `src/exit_archive/secrets.py` (definition) at this stage
+    - `uv run pytest -q -W error::pytest.PytestDeprecationWarning` passes (no asyncio loop-scope warning)
 - [ ] T1.2 Async Harvest HTTP client — owner: executor — est: 2.5h
   - [ ] T1.2.1 `harvest/http.py`: `HarvestClient` (async context manager) with base headers (`Authorization`, `Harvest-Account-Id`, `User-Agent: ExitArchive/<version>`), httpx timeouts
   - [ ] T1.2.2 Rate limiter: at most 100 requests per rolling 15 s (injectable clock for tests)

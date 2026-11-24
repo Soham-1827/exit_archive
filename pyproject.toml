@@ -1,0 +1,46 @@
+[project]
+name = "exit-archive"
+version = "0.1.0"
+description = "Export every record from a Harvest account as an offline, searchable archive."
+requires-python = ">=3.12"
+dependencies = ["httpx"]
+
+[project.scripts]
+exit-archive = "exit_archive.cli:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/exit_archive"]
+
+[dependency-groups]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "pytest-asyncio",
+    "respx",
+    "ruff",
+    "mypy",
+]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S", "SIM"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+files = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+markers = ["live: tests that call the real Harvest API (skipped by default)"]
+addopts = "-m 'not live' --cov=exit_archive --cov-report=term-missing --cov-fail-under=80"

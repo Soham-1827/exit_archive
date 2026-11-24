@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Planning done, no product code yet. The repo holds the agent pipeline scaffold (CLAUDE.md, docs/BRIEF.md, `.claude/agents/*`, `.claude/commands/pipeline.md`, `.gitignore`) plus PLAN.md, TODO.md and this file, staged but not yet committed. The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 27.5 h of the ~28 h budget. Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
+Planning is done and committed (3934f86). T0.1 (uv/Python 3.12 scaffold) passed the tester gate (12 tests, 100 % coverage, ruff/mypy clean) and is being committed now; next is T1.1 (token wrapper, safe errors, log redaction), which also carries two small T0.1 test-hygiene fixes as T1.1.4. The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 27.5 h of the ~28 h budget. Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
 
 ## What exists
 - `CLAUDE.md` — project rules, commands, verified Harvest API facts
@@ -12,9 +12,13 @@ Planning done, no product code yet. The repo holds the agent pipeline scaffold (
 - `PLAN.md` — architecture, module boundaries, data flow, token security model, archive layout, decisions, open decisions
 - `TODO.md` — phased tasks with owners, estimates and acceptance criteria
 - `HANDOVER.md` — this file
+- `pyproject.toml`, `uv.lock`, `.python-version` (3.12), `.env.example` (names only) — project + tool config (ruff, mypy strict, pytest with `-m 'not live'` and 80 % coverage gate)
+- `src/exit_archive/__init__.py` (`__version__`), `cli.py` (`--version` only), `py.typed`
+- `tests/conftest.py` — `harvest_live_credentials` fixture + `load_live_credentials()`; turns the coverage gate off only for `-m live` runs
+- `tests/test_cli.py`, `tests/test_conftest.py`, `tests/test_live_credentials_secrecy.py` — CLI and credential-secrecy tests
 
 ## How to run, test, deploy
-- Install: `uv sync` (after T0.1; Python 3.12 via `uv python install 3.12` if missing)
+- Install: `uv sync` (Python 3.12 via `uv python install 3.12` if missing)
 - Test: `uv run pytest -q` · live: `uv run pytest -m live -q` (reads `~/.harvest_test`)
 - Lint/types: `uv run ruff check . && uv run ruff format --check . && uv run mypy src`
 - CLI (after T1.6): `HARVEST_TOKEN=... uv run exit-archive export --out ./tmp/out` — in practice `set -a; . ~/.harvest_test; set +a` first, never paste the token
@@ -40,9 +44,9 @@ Planning done, no product code yet. The repo holds the agent pipeline scaffold (
 - D5 Approve privacy/data-handling page wording before launch.
 
 ## Next 3 tasks
-1. T0.1 Scaffold the Python project with uv (executor)
-2. T1.1 Token wrapper, safe errors and log redaction (executor)
-3. T1.2 Async Harvest HTTP client (executor)
+1. T1.1 Token wrapper, safe errors and log redaction, incl. T1.1.4 test-hygiene carry-over (executor)
+2. T1.2 Async Harvest HTTP client (executor)
+3. T1.3 Resource registry and fetchers (executor)
 
 ## Gotchas
 - `~/.harvest_test` is `KEY=VALUE` with keys `HARVEST_TOKEN` and `HARVEST_ACCOUNT_ID` (file mode 600). Only the `live` test fixture reads it; never print it or copy it into the repo or a prompt.
@@ -52,6 +56,9 @@ Planning done, no product code yet. The repo holds the agent pipeline scaffold (
 - FastAPI's default 422 response echoes the submitted `input` — must be replaced so a token is never reflected (T3.2).
 - Invoice PDF URLs need no token; never attach the Bearer header to them or to any non-Harvest redirect target.
 - Estimate PDF URL, rate limits on large accounts and pagination beyond page 1 are not yet verified on real data (T1.7 and Later).
+- First `uv sync` before `src/` existed left an empty editable install; fix with `uv sync --reinstall-package exit-archive` (fresh clones are fine).
+- `pytest -m live` alone selects no unit tests, so `tests/conftest.py` disables the coverage gate for exactly that mark expression; any other expression keeps the 80 % gate (tester proved it).
+- `tests/__init__.py` exists so tests can `from tests.conftest import load_live_credentials`; keep it, or move the loader into a helper module if it gets in the way.
 - Running in WSL on `/mnt/d` (NTFS): file permission bits show as 777; do not rely on chmod in tests.
 
 ## Secrets and where they live
@@ -60,4 +67,4 @@ Planning done, no product code yet. The repo holds the agent pipeline scaffold (
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED` — config, not secret; names listed in `.env.example` after T0.1/T3.2
 
 ## Last updated
-2026-11-24 — last commit: none yet
+2026-11-24 — last commit: 3934f86 (chore: scaffold agent pipeline and project plan); T0.1 commit pending
