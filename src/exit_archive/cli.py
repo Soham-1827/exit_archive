@@ -17,6 +17,7 @@ EXIT_OK = 0
 EXIT_USAGE = 2
 EXIT_AUTH = 3
 EXIT_ERROR = 4
+EXIT_INTERRUPTED = 130
 TOKEN_VAR = "HARVEST_TOKEN"  # noqa: S105 (an env var name, not a secret)
 ACCOUNT_VAR = "HARVEST_ACCOUNT_ID"
 
@@ -77,6 +78,9 @@ def _run_export(args: argparse.Namespace) -> int:
         logging.getLogger(name).setLevel(logging.WARNING)
     try:
         result = asyncio.run(export_account(token, args.out, account_id, _progress))
+    except KeyboardInterrupt:
+        _say("interrupted")
+        return EXIT_INTERRUPTED
     except AuthError as exc:
         _say(f"error: {redact(str(exc), token)}")
         return EXIT_AUTH

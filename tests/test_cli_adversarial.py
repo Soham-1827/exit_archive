@@ -37,7 +37,7 @@ def test_unexpected_exception_prints_type_name_only(
 
 
 @respx.mock
-def test_keyboard_interrupt_midexport_propagates_cleanly(
+def test_keyboard_interrupt_midexport_exits_130_cleanly(
     tmp_path: Path, token_env: None, capsys: Any
 ) -> None:
     routes = mock_harvest()
@@ -46,14 +46,30 @@ def test_keyboard_interrupt_midexport_propagates_cleanly(
         raise KeyboardInterrupt
 
     routes["time_entries"].mock(side_effect=interrupt)
-    with pytest.raises(KeyboardInterrupt) as exc:
-        main(["export", "--out", str(tmp_path)])
-    # Report: not caught by the CLI (exit via Python's default SIGINT handling, code 130).
-    assert SECRET not in repr(exc.value) and SECRET not in str(exc.value)
+    assert main(["export", "--out", str(tmp_path)]) == 130
     out, err = capsys.readouterr()
     assert SECRET not in out + err
+    assert "Traceback" not in err and "interrupted" in err
     assert list(tmp_path.iterdir()) == []
     assert logging.getLogRecordFactory().__name__ != "factory"  # redaction uninstalled
+
+
+@respx.mock
+def test_keyboard_interrupt_during_zip_stage_exits_130_cleanly(
+    tmp_path: Path, token_env: None, monkeypatch: pytest.MonkeyPatch, capsys: Any
+) -> None:
+    mock_harvest()
+
+    def interrupt(*a: Any, **k: Any) -> Path:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("exit_archive.exporter.zip_archive", interrupt)
+    assert main(["export", "--out", str(tmp_path)]) == 130
+    out, err = capsys.readouterr()
+    assert SECRET not in out + err
+    assert "Traceback" not in err and "interrupted" in err
+    assert list(tmp_path.iterdir()) == []
+    assert logging.getLogRecordFactory().__name__ != "factory"
 
 
 @respx.mock

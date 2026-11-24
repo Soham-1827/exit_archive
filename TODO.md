@@ -4,7 +4,7 @@ Legend: [ ] open · [~] in progress · [x] done · [!] blocked
 Budget: ~28 h total. Planned: 28 h (P0 1 · P1 11.5 · P2 3 · P3 6.5 · P4 6). Architecture, module names and the token security model are in PLAN.md.
 Standing acceptance for every executor task (the tester checks these even when not repeated): `uv run pytest -q` passes with coverage ≥ 80 %; `uv run ruff check .` and `uv run ruff format --check .` clean; `uv run mypy src` clean; no unit test touches the network (respx/fixtures only); any test that handles a token asserts the token string is absent from outputs and captured logs.
 
-## Phase 0: Project setup — one command installs, lints, type-checks and tests an empty package
+## Phase 0: Project setup — one command installs, lints, type-checks and tests an empty package — DONE
 - [x] T0.1 Scaffold the Python project with uv — owner: executor — est: 1h
   - [x] T0.1.1 `uv python pin 3.12` (writes `.python-version`); `pyproject.toml` with hatchling build backend, `requires-python = ">=3.12"`, runtime dep `httpx`, console script `exit-archive = "exit_archive.cli:main"`
   - [x] T0.1.2 Dev dependency group: `pytest`, `pytest-cov`, `pytest-asyncio`, `respx`, `ruff`, `mypy`
@@ -21,7 +21,7 @@ Standing acceptance for every executor task (the tester checks these even when n
     - `uv.lock`, `.python-version`, `.env.example` exist; `.env.example` contains no value after `=`
     - `git status --porcelain` shows no `.venv/`, caches or `.coverage` (gitignored)
 
-## Phase 1: Core export CLI — `exit-archive export --out DIR` writes a complete archive from the live trial account
+## Phase 1: Core export CLI — `exit-archive export --out DIR` writes a complete archive from the live trial account — DONE 2026-11-24
 - [x] T1.1 Token wrapper, safe errors and log redaction — owner: executor — est: 1h
   - [x] T1.1.1 `secrets.py`: `HarvestToken` (frozen, `__repr__`/`__str__`/`__format__` → `HarvestToken(***)`, `.reveal()`), `redact(text, token)` replacing the value and `Bearer \S+`, `install_log_redaction(token)` logging filter
   - [x] T1.1.2 `errors.py`: `ExitArchiveError` base + `AuthError`, `ForbiddenError`, `NotFoundError`, `RateLimitedError`, `HarvestUnavailableError`, `ExportError`; messages from safe fields only
@@ -94,16 +94,18 @@ Standing acceptance for every executor task (the tester checks these even when n
     - (from T1.3 gate) invoice id `0` or `-5` → `ExportError`, zero payment requests
     - (from T1.5 review) the CLI's logging setup sets the `httpx` and `httpcore` loggers to WARNING; an export test at the CLI's default log config shows no `/client/invoices/`, `/client/estimates/`, `client_key` value or `X-Amz-` query string in captured stderr/logs
     - (from T1.4 gate) when the export fails at any stage (writer abort, download error, zip error), `export_account` removes the work dir in a `finally` and leaves no `.zip` or `.zip.part` in `--out`; tested with a mid-stream exception and with a zip `OSError`
-- [!] T1.7 Live smoke test against the trial account — owner: executor — est: 1h — waiting for the user's yes to use the token in `~/.harvest_test`
-  - [ ] T1.7.0 (from T1.6 gate, no token needed) `cli.py`: catch `KeyboardInterrupt` in the export path → print `interrupted` to stderr, return 130, `--out` left clean, redaction uninstalled, no traceback
-  - [ ] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture
-  - [ ] T1.7.2 Report findings in the executor report: estimate PDF URL result, pagination shape seen, any field surprises
+- [x] T1.7 Live smoke test against the trial account — owner: executor — est: 1h — user-approved single live run passed 2026-11-24
+  - [x] T1.7.0 (from T1.6 gate, no token needed) `cli.py`: catch `KeyboardInterrupt` in the export path → print `interrupted` to stderr, return 130, `--out` left clean, redaction uninstalled, no traceback
+  - [x] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture
+  - [x] T1.7.1a When `EXIT_ARCHIVE_KEEP_LIVE_ZIP=1` is set, the live test copies the zip to `./tmp/live/` (gitignored via `tmp/`); otherwise only pytest's tmp_path is used
+  - [x] T1.7.2 Report findings in the executor report: estimate PDF URL result, pagination shape seen, any field surprises
   - Acceptance:
     - `uv run pytest -m live -q` passes against the trial account
     - The archive has counts: clients 1, projects 1, time_entries 1, expenses 1, invoices 1; 1 file under `receipts/` whose bytes equal the API's `file_size`; 1 file under `invoices/` starting with `%PDF`
     - `MANIFEST.json` sha256 values verify (`sha256sum` check in the test)
     - The token string is absent from every byte of the zip (asserted in the test)
     - `uv run pytest -q` (default, no live) still makes no network call
+    - The live test never prints the token or the account id (no `print`, assertion messages use counts only; `-rA` output checked); `git check-ignore tmp/live/<zip>` succeeds
     - (from T1.6 gate) a test sends `KeyboardInterrupt` mid-export: exit code 130, stderr `interrupted`, no traceback, `--out` empty
 
 ## Phase 2: Offline viewer — `index.html` searches and filters everything from `file://` with no network
@@ -201,7 +203,8 @@ Standing acceptance for every executor task (the tester checks these even when n
 
 ## Later
 - CSV flatten: detect a literal dotted key colliding with a nested path (`"client.name"` vs `client→name`) and suffix the column instead of overwriting; Harvest keys never contain dots, and JSON keeps both values, so this is cosmetic (from T1.4 gate)
-- Large-account test (10+ years, 50k+ time entries): measure rate-limit behaviour, memory peak and runtime; tune `MAX_CONCURRENT_JOBS` and instance size
+- Large-account test (10+ years, 50k+ time entries): measure rate-limit behaviour, memory peak and runtime, and confirm pagination past page 1 on real data; tune `MAX_CONCURRENT_JOBS` and instance size
+- Verify the estimate PDF URL `{base_uri}/client/estimates/{client_key}.pdf` on an account that has an estimate (T1.7 trial account has none; needs the user's OK for another live run)
 - Email the download link (needs an email provider) instead of "keep this page open/bookmark it"
 - $79 agency tier (> 5 users) via a second Payment Link
 - S3-compatible storage with lifecycle expiry if we ever run more than one instance
@@ -213,7 +216,7 @@ Standing acceptance for every executor task (the tester checks these even when n
 - More repriced vendors (FreshBooks, HoneyBook) — the brief's growth path
 
 ## Blocked / needs the user
-- T1.7 live smoke test: needs the user's yes to read `~/.harvest_test` and run ~20 read-only requests against the trial account
 - D1 Hosting platform (recommended: Render Starter + 10 GB disk ≈ $10/mo) — blocks T4.5, T4.6
 - D2 Payments (recommended: Stripe Payment Link at $49; you need a Stripe account, a product, a Payment Link with success URL `https://<host>/start?session_id={CHECKOUT_SESSION_ID}`, and a restricted key with Checkout Sessions read) — blocks live keys in T4.6
+- Live-token follow-ups: verify the estimate PDF URL (needs an estimate in the trial account + the user's OK for another live run); revoke/rotate the trial token when live testing ends (recommended after T4.6)
 - D3 Domain (optional) · D4 multi-account behaviour (recommendation in PLAN.md) · D5 approve privacy page wording before launch
