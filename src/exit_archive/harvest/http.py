@@ -6,12 +6,15 @@ exceptions (which can carry request details) are never chained.
 """
 
 import asyncio
+import contextlib
+import os
 import time
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
+from pathlib import Path
 from types import TracebackType
 from typing import Any, Self
-from urllib.parse import urlparse, urlsplit
+from urllib.parse import urljoin, urlparse, urlsplit
 
 import httpx
 
@@ -39,6 +42,10 @@ MAX_PAGES = 10_000
 DEFAULT_PORTS = {"https": 443, "http": 80}
 ORIGIN_ERROR = "Refusing to follow a link to a different origin"
 
+MAX_REDIRECTS = 5
+HARVEST_DOMAIN = "harvestapp.com"
+CHUNK_SIZE = 64 * 1024
+
 Origin = tuple[str, str, int]
 
 
@@ -57,6 +64,25 @@ def _origin(url: str) -> Origin | None:
     if parts.username is not None or parts.password is not None:
         return None
     return scheme, parts.hostname.lower(), port or DEFAULT_PORTS[scheme]
+
+
+def is_harvest_host_url(url: str) -> bool:
+    """True for https, port 443, no userinfo, host ``harvestapp.com`` or ``*.harvestapp.com``."""
+    origin = _origin(url)
+    if origin is None:
+        return False
+    scheme, host, port = origin
+    if scheme != "https" or port != 443:
+        return False
+    return host == HARVEST_DOMAIN or host.endswith("." + HARVEST_DOMAIN)
+
+
+class DownloadError(ExportError):
+    """A single file download failed for a fixed, token-free reason code."""
+
+    def __init__(self, reason: str) -> None:
+        self.reason = reason
+        super().__init__(f"Download failed: {reason}")
 
 
 Clock = Callable[[], float]
@@ -130,11 +156,18 @@ class HarvestClient:
         self._sleep = sleep
         self._limiter = RateLimiter(clock=clock, sleep=sleep)
         self._client: httpx.AsyncClient | None = None
+        self._dl_client: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> Self:
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
             headers=self._headers,
+            timeout=httpx.Timeout(30.0, connect=10.0, pool=10.0),
+            follow_redirects=False,
+        )
+        # Header-less client for binary downloads: Authorization is added per hop, never by default.
+        self._dl_client = httpx.AsyncClient(
+            headers={"User-Agent": self._headers["User-Agent"]},
             timeout=httpx.Timeout(30.0, connect=10.0, pool=10.0),
             follow_redirects=False,
         )
@@ -147,8 +180,10 @@ class HarvestClient:
         tb: TracebackType | None,
     ) -> None:
         client, self._client = self._client, None
-        if client is not None:
-            await client.aclose()
+        dl_client, self._dl_client = self._dl_client, None
+        for c in (client, dl_client):
+            if c is not None:
+                await c.aclose()
 
     @property
     def timeout(self) -> httpx.Timeout:
@@ -170,7 +205,11 @@ class HarvestClient:
         client = self._require()
         name = resource or urlparse(path).path or path
         self._check_origin(path)
-        response = await self._send_with_retries(client, path, params, name)
+
+        async def send() -> httpx.Response:
+            return await client.get(path, params=params)
+
+        response = await self._send_with_retries(send, name)
         return self._parse(response)
 
     def _check_origin(self, path: str) -> None:
@@ -180,20 +219,30 @@ class HarvestClient:
             raise ExportError(ORIGIN_ERROR) from None
 
     async def _send_with_retries(
-        self, client: httpx.AsyncClient, path: str, params: dict[str, Any] | None, name: str
+        self,
+        send: Callable[[], Awaitable[httpx.Response]],
+        name: str,
+        *,
+        allow_redirect: bool = False,
     ) -> httpx.Response:
+        """Run ``send`` under the shared limiter and 429/5xx rules; return a 2xx (or 3xx) reply.
+
+        Replies that are not returned are closed, so streamed bodies never leak.
+        """
         tries_429 = 0
         tries_5xx = 0
         last_5xx = 503
         while True:
             await self._limiter.acquire()
             try:
-                response = await client.get(path, params=params)
+                response = await send()
             except httpx.TransportError:
                 response = None
             status = response.status_code if response is not None else 503
-            if response is not None and status < 300:
+            if response is not None and (status < 300 or (allow_redirect and status < 400)):
                 return response
+            if response is not None:
+                await response.aclose()
             if response is not None and 300 <= status < 400:
                 raise ExportError(
                     f"Harvest returned an unexpected redirect ({status}) for {name}"
@@ -260,3 +309,110 @@ class HarvestClient:
             nxt = links.get("next") if isinstance(links, dict) else None
             url = nxt if isinstance(nxt, str) and nxt else None
             page_params = None  # the next link already carries the query string
+
+    async def download(
+        self,
+        url: str,
+        dest: Path,
+        *,
+        send_token: bool,
+        max_bytes: int,
+        require_prefix: bytes | None = None,
+    ) -> int:
+        """Stream ``url`` to ``dest`` and return the byte count.
+
+        This deliberately bypasses the same-origin guard of ``get``: receipts live on
+        ``*.harvestapp.com`` but are served via redirects to other hosts (object storage), and
+        PDFs come from the company ``base_uri``. Safety comes from per-hop rules instead.
+        Redirects are followed manually (at most 5) and every hop must be clean https. The
+        Bearer token is attached only when ``send_token`` is true AND that hop's host passes
+        ``is_harvest_host_url``; any other host gets no Authorization (nor account id).
+        The body is capped at ``max_bytes`` (``too_large``) and, if ``require_prefix`` is
+        given, must start with it (``not_a_pdf``). A partial file is always deleted.
+        """
+        client = self._dl_client
+        if client is None:
+            raise RuntimeError("HarvestClient must be used as an async context manager")
+        name = "download"
+        tmp = dest.with_name(dest.name + ".part")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            total = await self._download_to(
+                client, url, tmp, send_token, max_bytes, require_prefix, name
+            )
+            os.replace(tmp, dest)
+            return total
+        finally:
+            with contextlib.suppress(OSError):
+                tmp.unlink()
+
+    def _hop_headers(self, url: str, send_token: bool) -> dict[str, str]:
+        if not (send_token and is_harvest_host_url(url)):
+            return {}
+        keep = ("Authorization", "Harvest-Account-Id")
+        return {k: v for k, v in self._headers.items() if k in keep}
+
+    async def _download_to(
+        self,
+        client: httpx.AsyncClient,
+        url: str,
+        tmp: Path,
+        send_token: bool,
+        max_bytes: int,
+        require_prefix: bytes | None,
+        name: str,
+    ) -> int:
+        current = url
+        for _ in range(MAX_REDIRECTS + 1):
+            if _origin(current) is None:
+                raise DownloadError("bad_redirect") from None
+            headers = self._hop_headers(current, send_token)
+            target = current
+
+            async def send(
+                target: str = target, headers: dict[str, str] = headers
+            ) -> httpx.Response:
+                try:
+                    return await client.send(
+                        client.build_request("GET", target, headers=headers), stream=True
+                    )
+                except httpx.InvalidURL:  # httpx pre-parses the next Location even unfollowed
+                    raise DownloadError("bad_redirect") from None
+
+            response = await self._send_with_retries(send, name, allow_redirect=True)
+            try:
+                if response.status_code < 300:
+                    return await self._stream_body(response, tmp, max_bytes, require_prefix)
+                location = response.headers.get("Location")
+            finally:
+                await response.aclose()
+            if not location:
+                raise DownloadError("bad_redirect") from None
+            current = urljoin(current, location)
+            if _origin(current) is None or not current.lower().startswith("https://"):
+                raise DownloadError("bad_redirect") from None
+        raise DownloadError("too_many_redirects") from None
+
+    @staticmethod
+    async def _stream_body(
+        response: httpx.Response, tmp: Path, max_bytes: int, require_prefix: bytes | None
+    ) -> int:
+        declared = response.headers.get("Content-Length", "")
+        if declared.isdigit() and int(declared) > max_bytes:
+            raise DownloadError("too_large") from None
+        total = 0
+        head = b""
+        try:
+            with tmp.open("wb") as out:
+                async for chunk in response.aiter_bytes(CHUNK_SIZE):
+                    total += len(chunk)
+                    if total > max_bytes:
+                        raise DownloadError("too_large") from None
+                    if require_prefix is not None and len(head) < len(require_prefix):
+                        head += chunk[: len(require_prefix) - len(head)]
+                    out.write(chunk)
+        except httpx.TransportError:
+            raise HarvestUnavailableError("download", status_code=503) from None
+        if require_prefix is not None and not head.startswith(require_prefix):
+            raise DownloadError("not_a_pdf") from None
+        return total

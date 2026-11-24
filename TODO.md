@@ -70,11 +70,11 @@ Standing acceptance for every executor task (the tester checks these even when n
     - Interleaving test: `invoices, invoice_payments, invoices, invoice_payments` input yields correct, complete JSON and CSV for both; records with different nested keys produce one CSV whose header is the union, missing cells empty
     - An empty resource produces `[]` JSON and a CSV with no rows; no `.jsonl` file remains in the archive
     - Zip test: the zip contains `MANIFEST.json`, `README.txt`, `data/json/`, `data/csv/`; the work dir is gone afterwards
-- [ ] T1.5 Receipt and PDF downloads — owner: executor — est: 2h
-  - [ ] T1.5.1 `harvest/files.py`: receipt download with Bearer only if the URL host matches `*.harvestapp.com`; redirects followed manually and `Authorization` dropped on any host change
-  - [ ] T1.5.2 Invoice PDF `{base_uri}/client/invoices/{client_key}.pdf` and estimate PDF `{base_uri}/client/estimates/{client_key}.pdf`, both **without** the token; require body starting `%PDF`
-  - [ ] T1.5.2a Validate `company.base_uri` before building any PDF URL: scheme `https` and host equal to `harvestapp.com` or ending in `.harvestapp.com` (dot-anchored suffix, no userinfo, default port); otherwise every invoice/estimate PDF is recorded missing with reason `base_uri_not_allowed` and no request is made
-  - [ ] T1.5.3 Concurrency limit 4, per-file size cap 50 MB; every failure becomes a `missing[]` entry with a reason
+- [x] T1.5 Receipt and PDF downloads — owner: executor — est: 2h
+  - [x] T1.5.1 `harvest/files.py`: receipt download with Bearer only if the URL host matches `*.harvestapp.com`; redirects followed manually and `Authorization` dropped on any host change
+  - [x] T1.5.2 Invoice PDF `{base_uri}/client/invoices/{client_key}.pdf` and estimate PDF `{base_uri}/client/estimates/{client_key}.pdf`, both **without** the token; require body starting `%PDF`
+  - [x] T1.5.2a Validate `company.base_uri` before building any PDF URL: scheme `https` and host equal to `harvestapp.com` or ending in `.harvestapp.com` (dot-anchored suffix, no userinfo, default port); otherwise every invoice/estimate PDF is recorded missing with reason `base_uri_not_allowed` and no request is made
+  - [x] T1.5.3 Concurrency limit 4, per-file size cap 50 MB; every failure becomes a `missing[]` entry with a reason
   - Acceptance:
     - respx test: receipt on `x.harvestapp.com` gets `Authorization`; receipt on `evil.example.com` is not requested with the token (recorded missing, reason `host_not_allowed`); a redirect from harvestapp to an S3 host is followed with no `Authorization` header
     - respx test: PDF requests carry no `Authorization` header
@@ -92,6 +92,7 @@ Standing acceptance for every executor task (the tester checks these even when n
     - 401 from discovery → exit code 3, message has no token
     - (from T1.3 gate) payments 404 for invoice 1 of 2: export completes, invoice 2's payments and all later resources are present, `MANIFEST.missing` has one `invoice_payments` entry for invoice 1; a 401 mid-export still aborts with exit code 3
     - (from T1.3 gate) invoice id `0` or `-5` → `ExportError`, zero payment requests
+    - (from T1.5 review) the CLI's logging setup sets the `httpx` and `httpcore` loggers to WARNING; an export test at the CLI's default log config shows no `/client/invoices/`, `/client/estimates/`, `client_key` value or `X-Amz-` query string in captured stderr/logs
     - (from T1.4 gate) when the export fails at any stage (writer abort, download error, zip error), `export_account` removes the work dir in a `finally` and leaves no `.zip` or `.zip.part` in `--out`; tested with a mid-stream exception and with a zip `OSError`
 - [ ] T1.7 Live smoke test against the trial account — owner: executor — est: 1h
   - [ ] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture

@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token type, safe errors, log redaction) committed (bd88a39). T1.2 (async Harvest HTTP client) committed (04ca4f6). T1.3 (resource registry, streaming fetchers) committed (f97187f). T1.4 (archive writer with two-pass CSV, manifest, zip) passed the tester first time (278 tests, 99.2 % coverage) and is being committed now; next is T1.5 (receipt and PDF downloads). The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 28 h of the ~28 h budget (T1.6 grew by 0.5 h for hardening from the T1.3 gate). Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
+Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token type, safe errors, log redaction) committed (bd88a39). T1.2 (async Harvest HTTP client) committed (04ca4f6). T1.3 (resource registry, streaming fetchers) committed (f97187f). T1.4 (archive writer, manifest, zip) committed (a6c379c). T1.5 (receipt and PDF downloads with per-hop token rules, base_uri guard, size cap) passed the tester first time (370 tests, 99.4 % coverage) and is being committed now; next is T1.6 (exporter + `exit-archive export` CLI). The plan is CLI-first: Phase 0 sets up the uv/Python 3.12 project (1 h), Phase 1 builds `exit-archive export --out DIR` and proves it against the live Harvest trial account (11 h), Phase 2 adds the offline `index.html` viewer (3 h), Phase 3 the FastAPI web app with background jobs and the Stripe gate (6.5 h), Phase 4 container, CI, hardening, hosting and launch check (6 h). Total 28 h of the ~28 h budget (T1.6 grew by 0.5 h for hardening from the T1.3 gate). Hosting (D1) and payments (D2) are waiting for the user; nothing before T4.5 depends on them.
 
 ## What exists
 - `CLAUDE.md` — project rules, commands, verified Harvest API facts
@@ -28,6 +28,9 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - `src/exit_archive/archive/manifest.py` — `write_manifest(work_dir, counts, missing, skipped, account_id, company_name)`; sha256 of every file except itself
 - `src/exit_archive/archive/zipper.py` — `zip_archive(work_dir, out_dir, company_name)`; refuses symlinks, writes `.zip.part` then renames, removes the work dir
 - `tests/archive/` — writer/manifest/zipper tests incl. tester's adversarial suite
+- `src/exit_archive/harvest/http.py` (T1.5 additions) — `is_harvest_host_url()`, `DownloadError` (reason codes), `HarvestClient.download()` on a separate header-less client: token per hop only for https `*.harvestapp.com`, manual redirects ≤ 5, `.part` + rename, 50 MB cap
+- `src/exit_archive/harvest/files.py` — `download_files(client, work_dir, expenses=, invoices=, estimates=, base_uri=)` → `FilesResult(files, missing)`; receipts with token, PDFs without, Semaphore(4)
+- `tests/harvest/test_http_download.py`, `test_files.py`, `test_download_adversarial.py`
 
 ## How to run, test, deploy
 - Install: `uv sync` (Python 3.12 via `uv python install 3.12` if missing)
@@ -56,9 +59,9 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - D5 Approve privacy/data-handling page wording before launch.
 
 ## Next 3 tasks
-1. T1.5 Receipt and PDF downloads (executor) — includes the `base_uri` guard T1.5.2a
-2. T1.6 Exporter and CLI (executor) — includes payments-404 tolerance T1.6.1a and work-dir cleanup on failure
-3. T1.7 Live smoke test against the trial account (executor)
+1. T1.6 Exporter and CLI (executor) — includes T1.6.1a, work-dir cleanup on failure, httpx/httpcore WARNING pin
+2. T1.7 Live smoke test against the trial account (executor)
+3. T2.1 Viewer data bundle (executor)
 
 ## Gotchas
 - `~/.harvest_test` is `KEY=VALUE` with keys `HARVEST_TOKEN` and `HARVEST_ACCOUNT_ID` (file mode 600). Only the `live` test fixture reads it; never print it or copy it into the repo or a prompt.
@@ -80,6 +83,7 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - Today a payments 404 on one invoice aborts the whole export; T1.6.1a fixes it.
 - `ArchiveWriter.abort()` leaves a partial work dir; the caller (T1.6 `export_account`) must delete it in `finally`.
 - `write_manifest` hashes whatever is in the work dir, so it must run after records, files and viewer are written, and before `zip_archive`.
+- httpx logs full request URLs at INFO, including PDF URLs with the permanent `client_key`; the CLI and web logging setup must pin `httpx`/`httpcore` to WARNING.
 - Running in WSL on `/mnt/d` (NTFS): file permission bits show as 777; do not rely on chmod in tests.
 
 ## Secrets and where they live
@@ -88,4 +92,4 @@ Planning committed (3934f86); T0.1 scaffold committed (5aca471). T1.1 (token typ
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED` — config, not secret; names listed in `.env.example` after T0.1/T3.2
 
 ## Last updated
-2026-11-24 — last commit: f97187f (feat: add Harvest resource registry …); T1.4 commit pending
+2026-11-24 — last commit: a6c379c (feat: add streaming archive writer …); T1.5 commit pending
