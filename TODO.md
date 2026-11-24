@@ -58,11 +58,11 @@ Standing acceptance for every executor task (the tester checks these even when n
     - A test asserts the registry contains exactly the 14 resource names above plus `invoice_payments`
     - With `invoice_feature: false`, a test shows no request to `/v2/invoices` and `invoices` reported skipped
     - Payments test: 2 invoices → 2 payment requests, payments carry the right `invoice_id`
-- [ ] T1.4 Archive writer, manifest and zip — owner: executor — est: 2h
-  - [ ] T1.4.1 `archive/writer.py`: per-resource streaming JSON array + CSV (flattened dotted columns, UTF-8 with BOM), `safe_name()` (allow `[A-Za-z0-9._-]`, max 100 chars, id prefix), path-inside-work-dir assertion
-  - [ ] T1.4.1a Input is `iter_all()`'s interleaved `(name, record)` stream (invoice payments arrive between invoices): keep one lazily opened stream per resource name, never assume records are grouped, close all at the end. CSV columns vary per record, so first stream each record to `<resource>.jsonl` in a temp area while collecting the union of flattened column names, then write the CSV in a second pass over the JSONL line by line (memory stays per-record); the JSON array file is written in the first pass. Temp JSONL is deleted before zipping.
-  - [ ] T1.4.2 `archive/manifest.py`: counts per type, `files[]` with `path`, `bytes`, `sha256`, `missing[]` with `type`, `id`, `reason`, `skipped[]`, `generated_at`, `tool_version`, account id and company name
-  - [ ] T1.4.3 `archive/zipper.py`: zip work dir as `exit-archive-<company-slug>-<YYYYMMDD>.zip`, remove the work dir; `README.txt` written by the writer
+- [x] T1.4 Archive writer, manifest and zip — owner: executor — est: 2h
+  - [x] T1.4.1 `archive/writer.py`: per-resource streaming JSON array + CSV (flattened dotted columns, UTF-8 with BOM), `safe_name()` (allow `[A-Za-z0-9._-]`, max 100 chars, id prefix), path-inside-work-dir assertion
+  - [x] T1.4.1a Input is `iter_all()`'s interleaved `(name, record)` stream (invoice payments arrive between invoices): keep one lazily opened stream per resource name, never assume records are grouped, close all at the end. CSV columns vary per record, so first stream each record to `<resource>.jsonl` in a temp area while collecting the union of flattened column names, then write the CSV in a second pass over the JSONL line by line (memory stays per-record); the JSON array file is written in the first pass. Temp JSONL is deleted before zipping.
+  - [x] T1.4.2 `archive/manifest.py`: counts per type, `files[]` with `path`, `bytes`, `sha256`, `missing[]` with `type`, `id`, `reason`, `skipped[]`, `generated_at`, `tool_version`, account id and company name
+  - [x] T1.4.3 `archive/zipper.py`: zip work dir as `exit-archive-<company-slug>-<YYYYMMDD>.zip`, remove the work dir; `README.txt` written by the writer
   - Acceptance:
     - `safe_name("../../etc/passwd")`, names with `/`, `\`, NUL, 300 chars, and unicode all yield names inside the work dir (parametrized test)
     - A CSV round-trip test: nested `client.name` becomes a column; a value containing a comma, quote and newline survives `csv.reader`
@@ -92,6 +92,7 @@ Standing acceptance for every executor task (the tester checks these even when n
     - 401 from discovery → exit code 3, message has no token
     - (from T1.3 gate) payments 404 for invoice 1 of 2: export completes, invoice 2's payments and all later resources are present, `MANIFEST.missing` has one `invoice_payments` entry for invoice 1; a 401 mid-export still aborts with exit code 3
     - (from T1.3 gate) invoice id `0` or `-5` → `ExportError`, zero payment requests
+    - (from T1.4 gate) when the export fails at any stage (writer abort, download error, zip error), `export_account` removes the work dir in a `finally` and leaves no `.zip` or `.zip.part` in `--out`; tested with a mid-stream exception and with a zip `OSError`
 - [ ] T1.7 Live smoke test against the trial account — owner: executor — est: 1h
   - [ ] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture
   - [ ] T1.7.2 Report findings in the executor report: estimate PDF URL result, pagination shape seen, any field surprises
@@ -195,6 +196,7 @@ Standing acceptance for every executor task (the tester checks these even when n
     - Zero failed items, or each failure has a TODO task created by the orchestrator
 
 ## Later
+- CSV flatten: detect a literal dotted key colliding with a nested path (`"client.name"` vs `client→name`) and suffix the column instead of overwriting; Harvest keys never contain dots, and JSON keeps both values, so this is cosmetic (from T1.4 gate)
 - Large-account test (10+ years, 50k+ time entries): measure rate-limit behaviour, memory peak and runtime; tune `MAX_CONCURRENT_JOBS` and instance size
 - Email the download link (needs an email provider) instead of "keep this page open/bookmark it"
 - $79 agency tier (> 5 users) via a second Payment Link
