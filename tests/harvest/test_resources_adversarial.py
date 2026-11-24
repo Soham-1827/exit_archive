@@ -48,7 +48,7 @@ async def test_non_int_invoice_ids_rejected_before_any_request(bad: Any) -> None
 
 
 @respx.mock
-@pytest.mark.parametrize("good", [0, 7, -5, 10**30])
+@pytest.mark.parametrize("good", [7, 10**30])
 async def test_int_ids_only_hit_invoice_payments_pattern(good: int) -> None:
     seen: list[str] = []
 

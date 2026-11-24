@@ -81,10 +81,10 @@ Standing acceptance for every executor task (the tester checks these even when n
     - An HTML login page returned instead of a PDF is recorded missing with reason `not_a_pdf`
     - A 404 on one receipt does not stop the others (test with 3 receipts, 1 failing)
     - (from T1.3 gate) `base_uri` values `http://acme.harvestapp.com`, `https://evil.example.com`, `https://harvestapp.com.evil.com`, `https://x@acme.harvestapp.com`, `javascript:alert(1)` and `""` each produce zero PDF requests and `base_uri_not_allowed` entries; `https://acme.harvestapp.com` works
-- [ ] T1.6 Exporter and CLI `export` command — owner: executor — est: 1.5h
-  - [ ] T1.6.1 `exporter.py`: `export_account(token, out_dir, account_id=None, progress=None) -> ExportResult` wiring T1.2–T1.5; progress callback `(stage, done, total)`; releases the client at the end
-  - [ ] T1.6.1a (from T1.3 gate) In `harvest/resources.py`: a `NotFoundError` or `ForbiddenError` on one invoice's payments is recorded as `missing[]` (`type: invoice_payments`, `id: <invoice id>`, reason `not_found`/`forbidden`) via a callback or result object, and the export continues; `AuthError`, `RateLimitedError` and `HarvestUnavailableError` still abort. Invoice ids < 1 are rejected with `ExportError` before any request
-  - [ ] T1.6.2 `cli.py`: `exit-archive export --out DIR [--account-id ID]`; token from `HARVEST_TOKEN` only (no `--token` flag); progress lines on stderr; exit codes 0 ok, 2 usage/missing token, 3 auth error, 4 other export error; installs log redaction
+- [x] T1.6 Exporter and CLI `export` command — owner: executor — est: 1.5h
+  - [x] T1.6.1 `exporter.py`: `export_account(token, out_dir, account_id=None, progress=None) -> ExportResult` wiring T1.2–T1.5; progress callback `(stage, done, total)`; releases the client at the end
+  - [x] T1.6.1a (from T1.3 gate) In `harvest/resources.py`: a `NotFoundError` or `ForbiddenError` on one invoice's payments is recorded as `missing[]` (`type: invoice_payments`, `id: <invoice id>`, reason `not_found`/`forbidden`) via a callback or result object, and the export continues; `AuthError`, `RateLimitedError` and `HarvestUnavailableError` still abort. Invoice ids < 1 are rejected with `ExportError` before any request
+  - [x] T1.6.2 `cli.py`: `exit-archive export --out DIR [--account-id ID]`; token from `HARVEST_TOKEN` only (no `--token` flag); progress lines on stderr; exit codes 0 ok, 2 usage/missing token, 3 auth error, 4 other export error; installs log redaction
   - Acceptance:
     - `HARVEST_TOKEN= uv run exit-archive export --out /tmp/x` exits 2 with a message naming `HARVEST_TOKEN`
     - `uv run exit-archive export --help` shows `--out` and `--account-id` and no `--token`
@@ -94,7 +94,8 @@ Standing acceptance for every executor task (the tester checks these even when n
     - (from T1.3 gate) invoice id `0` or `-5` → `ExportError`, zero payment requests
     - (from T1.5 review) the CLI's logging setup sets the `httpx` and `httpcore` loggers to WARNING; an export test at the CLI's default log config shows no `/client/invoices/`, `/client/estimates/`, `client_key` value or `X-Amz-` query string in captured stderr/logs
     - (from T1.4 gate) when the export fails at any stage (writer abort, download error, zip error), `export_account` removes the work dir in a `finally` and leaves no `.zip` or `.zip.part` in `--out`; tested with a mid-stream exception and with a zip `OSError`
-- [ ] T1.7 Live smoke test against the trial account — owner: executor — est: 1h
+- [!] T1.7 Live smoke test against the trial account — owner: executor — est: 1h — waiting for the user's yes to use the token in `~/.harvest_test`
+  - [ ] T1.7.0 (from T1.6 gate, no token needed) `cli.py`: catch `KeyboardInterrupt` in the export path → print `interrupted` to stderr, return 130, `--out` left clean, redaction uninstalled, no traceback
   - [ ] T1.7.1 `tests/live/test_live_export.py` marked `live`, using the `harvest_live_credentials` fixture
   - [ ] T1.7.2 Report findings in the executor report: estimate PDF URL result, pagination shape seen, any field surprises
   - Acceptance:
@@ -103,6 +104,7 @@ Standing acceptance for every executor task (the tester checks these even when n
     - `MANIFEST.json` sha256 values verify (`sha256sum` check in the test)
     - The token string is absent from every byte of the zip (asserted in the test)
     - `uv run pytest -q` (default, no live) still makes no network call
+    - (from T1.6 gate) a test sends `KeyboardInterrupt` mid-export: exit code 130, stderr `interrupted`, no traceback, `--out` empty
 
 ## Phase 2: Offline viewer — `index.html` searches and filters everything from `file://` with no network
 - [ ] T2.1 Viewer data bundle — owner: executor — est: 1h
@@ -133,11 +135,12 @@ Standing acceptance for every executor task (the tester checks these even when n
     - Test: 3 submitted jobs with limit 2 → at most 2 run concurrently
     - Test: an archive with `expires_at` in the past is deleted by the sweep and its row is `expired`; one in the future is kept
     - Test: a `running` row at startup becomes `failed`/`server_restarted`
+    - (from T1.6 review) Test: the sweep also removes orphan export work dirs under `$DATA_DIR` older than 1 h (e.g. left when the zip was renamed into place but `rmtree` failed, or after a crash)
     - Test: jobs A and B overlap, A finishes first; a log line containing B's token after that is still scrubbed
 - [ ] T3.2 Web routes and pages — owner: executor — est: 2.5h
   - [ ] T3.2.1 `web/app.py` (FastAPI, Jinja2): `GET /` landing (what you get, $49, privacy summary, Buy button → `STRIPE_PAYMENT_LINK_URL`), `GET /start?session_id=` token form, `POST /jobs` (form: token, optional account_id, session_id) → 303 to `/jobs/{id}`, `GET /jobs/{id}` progress page (meta refresh 3 s), `GET /jobs/{id}/download` (FileResponse; 404 unknown id; 410 expired), `GET /healthz`, `GET /privacy`
   - [ ] T3.2.2 Custom `RequestValidationError` handler that never echoes input; templates never render the token; form uses `autocomplete="off"`
-  - [ ] T3.2.3 Lifespan: init store, mark stale jobs, start cleanup loop; configuration from env (`DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`, `STRIPE_PAYMENT_LINK_URL`, `STRIPE_SECRET_KEY`, `PUBLIC_BASE_URL`) with startup validation; documented in `.env.example` (names only)
+  - [ ] T3.2.3 Lifespan (from T1.6 gate: also install log redaction and pin `httpx`/`httpcore` to WARNING once here): init store, mark stale jobs, start cleanup loop; configuration from env (`DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`, `STRIPE_PAYMENT_LINK_URL`, `STRIPE_SECRET_KEY`, `PUBLIC_BASE_URL`) with startup validation; documented in `.env.example` (names only)
   - Acceptance:
     - TestClient flow with a stubbed exporter: POST `/jobs` → 303 → progress page shows `done` → download returns a zip with `application/zip`
     - Test: POST `/jobs` with a missing field returns 4xx whose body does not contain the submitted token
@@ -210,6 +213,7 @@ Standing acceptance for every executor task (the tester checks these even when n
 - More repriced vendors (FreshBooks, HoneyBook) — the brief's growth path
 
 ## Blocked / needs the user
+- T1.7 live smoke test: needs the user's yes to read `~/.harvest_test` and run ~20 read-only requests against the trial account
 - D1 Hosting platform (recommended: Render Starter + 10 GB disk ≈ $10/mo) — blocks T4.5, T4.6
 - D2 Payments (recommended: Stripe Payment Link at $49; you need a Stripe account, a product, a Payment Link with success URL `https://<host>/start?session_id={CHECKOUT_SESSION_ID}`, and a restricted key with Checkout Sessions read) — blocks live keys in T4.6
 - D3 Domain (optional) · D4 multi-account behaviour (recommendation in PLAN.md) · D5 approve privacy page wording before launch

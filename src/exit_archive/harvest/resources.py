@@ -4,11 +4,11 @@ Nothing here writes files or holds a whole account in memory: records are yielde
 time as pages arrive. ``invoice_payments`` is not a registry entry; it is fetched per invoice.
 """
 
-from collections.abc import AsyncIterator, Iterable
+from collections.abc import AsyncIterator, Callable, Iterable
 from dataclasses import dataclass
 from typing import Any
 
-from exit_archive.errors import ExportError
+from exit_archive.errors import ExportError, ForbiddenError, NotFoundError
 from exit_archive.harvest.http import HarvestClient
 
 COMPANY_PATH = "/v2/company"
@@ -99,27 +99,50 @@ def iter_resource(client: HarvestClient, resource: Resource) -> AsyncIterator[di
     return client.paginate(resource.path, resource.key)
 
 
+def _check_invoice_id(invoice_id: object) -> int:
+    if isinstance(invoice_id, bool) or not isinstance(invoice_id, int):
+        raise ExportError("Harvest invoice has no integer id")
+    if invoice_id < 1:
+        raise ExportError("Harvest invoice has an invalid id")
+    return invoice_id
+
+
 async def iter_invoice_payments(
-    client: HarvestClient, invoice_ids: Iterable[int]
+    client: HarvestClient,
+    invoice_ids: Iterable[int],
+    on_missing: Callable[[dict[str, Any]], None] | None = None,
 ) -> AsyncIterator[dict[str, Any]]:
-    """Stream payments for each invoice id, tagging each (as a new dict) with ``invoice_id``."""
-    for invoice_id in invoice_ids:
-        if isinstance(invoice_id, bool) or not isinstance(invoice_id, int):
-            raise ExportError("Harvest invoice has no integer id")
+    """Stream payments for each invoice id, tagging each (as a new dict) with ``invoice_id``.
+
+    Every id is validated before the first request. With ``on_missing``, a 404/403 on one
+    invoice's payments is reported as ``{type, id, reason}`` and the stream continues; without
+    it the error propagates. Auth, rate-limit and outage errors always propagate.
+    """
+    ids = [_check_invoice_id(i) for i in invoice_ids]
+    for invoice_id in ids:
         path = f"/v2/invoices/{invoice_id}/payments"
-        async for payment in client.paginate(path, INVOICE_PAYMENTS.key):
-            if not isinstance(payment, dict):
-                raise ExportError("Harvest returned an unexpected invoice payment shape")
-            yield {**payment, "invoice_id": invoice_id}
+        try:
+            async for payment in client.paginate(path, INVOICE_PAYMENTS.key):
+                if not isinstance(payment, dict):
+                    raise ExportError("Harvest returned an unexpected invoice payment shape")
+                yield {**payment, "invoice_id": invoice_id}
+        except (NotFoundError, ForbiddenError) as exc:
+            if on_missing is None:
+                raise
+            reason = "not_found" if isinstance(exc, NotFoundError) else "forbidden"
+            on_missing({"type": INVOICE_PAYMENTS.name, "id": invoice_id, "reason": reason})
 
 
 async def iter_all(
-    client: HarvestClient, company: Company
+    client: HarvestClient,
+    company: Company,
+    on_missing: Callable[[dict[str, Any]], None] | None = None,
 ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
     """Yield ``(resource_name, record)`` for every enabled resource, in registry order.
 
     Payments for an invoice are yielded right after that invoice, so only one record is
     held at a time. Disabled resources make no request; see ``skipped_resources``.
+    ``on_missing`` receives ``missing[]`` entries for invoices whose payments are gone.
     """
     for resource in REGISTRY:
         if not _enabled(resource, company):
@@ -128,5 +151,5 @@ async def iter_all(
             yield resource.name, record
             if resource.name == "invoices":
                 invoice_id: Any = record.get("id")
-                async for payment in iter_invoice_payments(client, [invoice_id]):
+                async for payment in iter_invoice_payments(client, [invoice_id], on_missing):
                     yield INVOICE_PAYMENTS.name, payment
