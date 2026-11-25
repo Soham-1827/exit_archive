@@ -36,8 +36,8 @@ jobs:
       - name: Secret reveal allow-list
         run: |
           # secrets module name is split so a naive grep for the GitHub secrets context stays clean
-          expected="$(printf 'src/exit_archive/%s\n' harvest/http.py "secret"s.py web/payments.py)"
-          actual="$(grep -rln "\.reveal()" src/ | sort)"
+          expected="$(printf 'src/exit_archive/%s\n' harvest/http.py "secret"s.py web/payments.py | LC_ALL=C sort)"
+          actual="$(grep -rln --include='*.py' "\.reveal()" src/ | LC_ALL=C sort)"
           echo "$actual"
           test "$actual" = "$expected"
 
