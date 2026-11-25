@@ -1,14 +1,18 @@
 """Environment settings. Errors name the variable and never print its value."""
 
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from exit_archive.secrets import Secret
+
 __all__ = ["Settings", "SettingsError"]
 
 _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1"})
 MIN_JOBS, MAX_JOBS, DEFAULT_JOBS = 1, 8, 2
+_STRIPE_KEY = re.compile(r"(sk|rk)_(test|live)_[A-Za-z0-9]+")
 
 
 class SettingsError(ValueError):
@@ -61,6 +65,18 @@ def _link(environ: Mapping[str, str]) -> str | None:
     return value
 
 
+def _stripe_key(environ: Mapping[str, str], required: bool) -> Secret | None:
+    """Wrap ``STRIPE_SECRET_KEY``; a publishable (pk_) or malformed key is rejected by name."""
+    value = _optional(environ, "STRIPE_SECRET_KEY")
+    if value is None:
+        if required:
+            raise _bad("STRIPE_SECRET_KEY", "is required when PAYMENT_REQUIRED is true")
+        return None
+    if not _STRIPE_KEY.fullmatch(value):
+        raise _bad("STRIPE_SECRET_KEY", "must be a Stripe secret or restricted key (sk_/rk_)")
+    return Secret(value)
+
+
 def _base_url(environ: Mapping[str, str]) -> str | None:
     value = _optional(environ, "PUBLIC_BASE_URL")
     if value is None:
@@ -78,18 +94,25 @@ class Settings:
     payment_required: bool = True
     stripe_payment_link_url: str | None = None
     public_base_url: str | None = None
-    stripe_secret_key: str | None = field(default=None, repr=False)  # validated in T3.3
+    stripe_secret_key: Secret | None = field(default=None, repr=False)
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "Settings":
         data_dir = _optional(environ, "DATA_DIR")
         if data_dir is None:
             raise _bad("DATA_DIR", "is required")
+        jobs = _jobs(environ)
+        required = _payment_required(environ)
+        link = _link(environ)
+        base_url = _base_url(environ)
+        key = _stripe_key(environ, required)  # Stripe variables last, so older errors keep priority
+        if required and link is None:
+            raise _bad("STRIPE_PAYMENT_LINK_URL", "is required when PAYMENT_REQUIRED is true")
         return cls(
             data_dir=Path(data_dir),
-            max_concurrent_jobs=_jobs(environ),
-            payment_required=_payment_required(environ),
-            stripe_payment_link_url=_link(environ),
-            public_base_url=_base_url(environ),
-            stripe_secret_key=_optional(environ, "STRIPE_SECRET_KEY"),
+            max_concurrent_jobs=jobs,
+            payment_required=required,
+            stripe_payment_link_url=link,
+            public_base_url=base_url,
+            stripe_secret_key=key,
         )

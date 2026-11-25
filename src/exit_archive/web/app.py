@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
 
+import httpx
 from fastapi import FastAPI, Form, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
@@ -25,7 +26,13 @@ from exit_archive.jobs.runner import ARCHIVES_DIR, ExportFn, JobRunner
 from exit_archive.jobs.store import Job, JobStore, to_iso, utcnow
 from exit_archive.secrets import install_log_redaction
 from exit_archive.web.forms import JOB_ID, BadInputError, parse_job_form
-from exit_archive.web.payments import AllowAllVerifier, PaymentVerifier
+from exit_archive.web.payments import (
+    AllowAllVerifier,
+    MalformedSessionError,
+    PaymentProviderError,
+    PaymentVerifier,
+    StripeVerifier,
+)
 from exit_archive.web.settings import Settings
 
 __all__ = ["PaymentVerifier", "app", "create_app"]
@@ -42,6 +49,10 @@ _MESSAGES = {
     422: "The form was incomplete. Go back and fill in the token field.",
     503: "A service we depend on is not available. Please try again in a minute.",
 }
+_UNPAID = (
+    "We could not confirm your payment. If you have paid, wait a minute and reload this page. "
+    "If it still does not work, contact the seller using the email address on your payment receipt."
+)
 _GENERIC = "Something went wrong on our side. Please try again."
 
 
@@ -103,9 +114,15 @@ def create_app(
         uninstall = install_log_redaction(
             None
         )  # Bearer-only; per-job tokens are added by the runner
+        uninstall_key = install_log_redaction(cfg.stripe_secret_key)  # no-op when None
+        stripe_client: httpx.AsyncClient | None = None
         try:
             for name in ("httpx", "httpcore"):
                 logging.getLogger(name).setLevel(logging.WARNING)
+            verifier = payments
+            if cfg.payment_required and verifier is None and cfg.stripe_secret_key is not None:
+                stripe_client = httpx.AsyncClient(follow_redirects=False)
+                verifier = StripeVerifier(cfg.stripe_secret_key, stripe_client)
             (cfg.data_dir / ARCHIVES_DIR).mkdir(parents=True, exist_ok=True)
             store = JobStore(cfg.data_dir / "jobs.sqlite3")
             runner = JobRunner(store, cfg.data_dir, cfg.max_concurrent_jobs, export=export)
@@ -115,7 +132,8 @@ def create_app(
             app.state.settings = cfg
             app.state.store = store
             app.state.runner = runner
-            app.state.verifier = AllowAllVerifier() if not cfg.payment_required else payments
+            app.state.stripe_client = stripe_client
+            app.state.verifier = AllowAllVerifier() if not cfg.payment_required else verifier
             try:
                 yield
             finally:
@@ -124,6 +142,9 @@ def create_app(
                 with contextlib.suppress(asyncio.CancelledError):
                     await cleanup
         finally:
+            if stripe_client is not None:
+                await stripe_client.aclose()
+            uninstall_key()
             uninstall()
 
     app = FastAPI(
@@ -162,7 +183,24 @@ def create_app(
 
     @app.get("/start")
     async def start(request: Request, session_id: str = "") -> Response:
-        return page(request, "start.html", session_id=session_id[:255])
+        if not request.app.state.settings.payment_required:
+            return page(request, "start.html", session_id=session_id[:255])
+        verifier: PaymentVerifier | None = request.app.state.verifier
+        if verifier is None:
+            return error_page(request, 402, _UNPAID)
+        try:
+            paid = await verifier.verify(session_id)
+        except MalformedSessionError:
+            return error_page(request, 400)
+        except PaymentProviderError as exc:
+            _log.warning("payment check failed (%s)", type(exc).__name__)
+            return error_page(request, 503)
+        except Exception as exc:  # noqa: BLE001 - log the type only
+            _log.warning("payment check failed (%s)", type(exc).__name__)
+            return error_page(request, 503)
+        if paid is not True:
+            return error_page(request, 402, _UNPAID)
+        return page(request, "start.html", session_id=session_id)
 
     @app.post("/jobs")
     async def create_job(
@@ -182,6 +220,11 @@ def create_app(
             return error_page(request, 402)
         try:
             paid = await verifier.verify(form.session_id or "")
+        except MalformedSessionError:
+            return error_page(request, 400)
+        except PaymentProviderError as exc:
+            _log.warning("payment check failed (%s)", type(exc).__name__)
+            return error_page(request, 503)
         except Exception as exc:  # noqa: BLE001 - log the type only
             _log.warning("payment check failed (%s)", type(exc).__name__)
             return error_page(request, 503)

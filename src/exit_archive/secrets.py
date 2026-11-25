@@ -11,66 +11,80 @@ _MASK = "***"
 _BEARER = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
 
 
-class HarvestToken:
-    """A Harvest API token whose text form never shows the value."""
+class Secret:
+    """A secret string whose text form never shows the value.
+
+    Slotted, immutable, unpicklable and uncopyable. ``reveal()`` is the only way to read it.
+    """
 
     __slots__ = ("_value",)
     _value: str
 
     def __init__(self, value: str) -> None:
         if not value:
-            raise ValueError("token must not be empty")
+            raise ValueError("secret must not be empty")
         object.__setattr__(self, "_value", value)
 
     def __setattr__(self, name: str, value: object) -> None:
-        raise AttributeError("HarvestToken is immutable")
+        raise AttributeError(f"{type(self).__name__} is immutable")
 
     def __delattr__(self, name: str) -> None:
-        raise AttributeError("HarvestToken is immutable")
+        raise AttributeError(f"{type(self).__name__} is immutable")
 
     def __eq__(self, other: object) -> bool:
-        return isinstance(other, HarvestToken) and self._value == other._value
+        return type(other) is type(self) and self._value == other._value
 
     def __hash__(self) -> int:
         return hash(self._value)
 
     def __repr__(self) -> str:
-        return "HarvestToken(***)"
+        return f"{type(self).__name__}(***)"
 
     __str__ = __repr__
 
     def __format__(self, format_spec: str) -> str:
-        return "HarvestToken(***)"
+        return repr(self)
 
     def __reduce__(self) -> NoReturn:
-        raise TypeError("HarvestToken cannot be pickled or copied")
+        raise TypeError(f"{type(self).__name__} cannot be pickled or copied")
 
     def __reduce_ex__(self, protocol: object) -> NoReturn:
-        raise TypeError("HarvestToken cannot be pickled or copied")
+        raise TypeError(f"{type(self).__name__} cannot be pickled or copied")
 
     def reveal(self) -> str:
-        """Return the raw token. Only the HTTP client should call this."""
+        """Return the raw value. Only the HTTP code that must send it should call this."""
         return self._value
 
 
-def redact(text: str, token: HarvestToken | None) -> str:
+class HarvestToken(Secret):
+    """A Harvest API token whose text form never shows the value."""
+
+    __slots__ = ()
+
+    def __init__(self, value: str) -> None:
+        if not value:
+            raise ValueError("token must not be empty")
+        super().__init__(value)
+
+
+def redact(text: str, token: Secret | None) -> str:
     """Replace the token value and any ``Bearer <credential>`` with ``***``."""
     if token is not None:
         text = text.replace(token.reveal(), _MASK)
     return _BEARER.sub(_MASK, text)
 
 
-def _redact_all(text: str, tokens: tuple[HarvestToken, ...]) -> str:
+def _redact_all(text: str, tokens: tuple[Secret, ...]) -> str:
     for token in tokens:  # longest first, so a token containing another is fully masked
         text = text.replace(token.reveal(), _MASK)
     return _BEARER.sub(_MASK, text)
 
 
-def _has_secret(text: str, tokens: tuple[HarvestToken, ...]) -> bool:
+def _has_secret(text: str, tokens: tuple[Secret, ...]) -> bool:
     return bool(_BEARER.search(text)) or any(t.reveal() in text for t in tokens)
 
 
-def _scrub_value(value: object, tokens: tuple[HarvestToken, ...]) -> object:
+def _scrub_value(value: object, tokens: tuple[Secret, ...]) -> object:
     """Redact a str, or a non-str whose ``str()`` holds a secret; anything else is kept."""
     if isinstance(value, str):
         return _redact_all(value, tokens)
@@ -81,7 +95,7 @@ def _scrub_value(value: object, tokens: tuple[HarvestToken, ...]) -> object:
     return _redact_all(text, tokens) if _has_secret(text, tokens) else value
 
 
-def _scrub_args(args: object, tokens: tuple[HarvestToken, ...]) -> object:
+def _scrub_args(args: object, tokens: tuple[Secret, ...]) -> object:
     """Redact args in place: same tuple length and order, or the mapping's same keys."""
     if isinstance(args, tuple):
         return tuple(_scrub_value(a, tokens) for a in args)
@@ -90,7 +104,7 @@ def _scrub_args(args: object, tokens: tuple[HarvestToken, ...]) -> object:
     return args
 
 
-def _scrub_message(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) -> None:
+def _scrub_message(record: logging.LogRecord, tokens: tuple[Secret, ...]) -> None:
     """Redact msg/args without changing the record's shape when that is possible."""
     try:
         message = record.getMessage()
@@ -114,7 +128,7 @@ def _scrub_message(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) 
         record.args = ()
 
 
-def _scrub_record(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) -> None:
+def _scrub_record(record: logging.LogRecord, tokens: tuple[Secret, ...]) -> None:
     """Scrub the token values and bearer credentials from a record in place."""
     _scrub_message(record, tokens)
     if record.exc_info and not record.exc_text:
@@ -138,8 +152,8 @@ class _Registry:
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._ids = itertools.count(1)
-        self._active: dict[int, HarvestToken | None] = {}
-        self._tokens: tuple[HarvestToken, ...] = ()  # read lock-free by the hook
+        self._active: dict[int, Secret | None] = {}
+        self._tokens: tuple[Secret, ...] = ()  # read lock-free by the hook
         self._original: Callable[..., logging.LogRecord] | None = None
         self._left_original: Callable[..., logging.LogRecord] | None = None
         self._local = threading.local()
@@ -168,7 +182,7 @@ class _Registry:
         unique = {t.reveal(): t for t in self._active.values() if t is not None}
         self._tokens = tuple(sorted(unique.values(), key=lambda t: -len(t.reveal())))
 
-    def register(self, token: HarvestToken | None) -> Callable[[], None]:
+    def register(self, token: Secret | None) -> Callable[[], None]:
         with self._lock:
             if not self._active:
                 if logging.getLogRecordFactory() is not self._hook_fn:
@@ -205,7 +219,7 @@ _MISSING: object = object()
 _REGISTRY = _Registry()
 
 
-def install_log_redaction(token: HarvestToken | None) -> Callable[[], None]:
+def install_log_redaction(token: Secret | None) -> Callable[[], None]:
     """Scrub every record from every logger; returns an idempotent function that undoes it.
 
     All registrations share one process-wide record-factory hook, so overlapping jobs are safe

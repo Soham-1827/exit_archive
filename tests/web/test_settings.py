@@ -13,14 +13,21 @@ def _env(tmp_path: Path, **extra: str) -> dict[str, str]:
     return {"DATA_DIR": str(tmp_path), **extra}
 
 
+_PAID = {
+    "STRIPE_SECRET_KEY": "rk_test_FAKEFAKE",
+    "STRIPE_PAYMENT_LINK_URL": "https://buy.stripe.com/test_FAKE",
+}
+
+
 def test_defaults(tmp_path: Path) -> None:
-    s = Settings.from_env(_env(tmp_path))
+    s = Settings.from_env(_env(tmp_path, **_PAID))
     assert s.data_dir == tmp_path
     assert s.max_concurrent_jobs == 2
     assert s.payment_required is True
-    assert s.stripe_payment_link_url is None
+    assert s.stripe_payment_link_url == "https://buy.stripe.com/test_FAKE"
     assert s.public_base_url is None
-    assert s.stripe_secret_key is None
+    assert s.stripe_secret_key is not None
+    assert s.stripe_secret_key.reveal() == "rk_test_FAKEFAKE"
 
 
 def test_all_values_read(tmp_path: Path) -> None:
@@ -37,12 +44,20 @@ def test_all_values_read(tmp_path: Path) -> None:
     assert (s.max_concurrent_jobs, s.payment_required) == (8, False)
     assert s.stripe_payment_link_url == "https://buy.example/abc"
     assert s.public_base_url == "https://app.example"
-    assert s.stripe_secret_key == "sk_test_x"  # noqa: S105
+    assert s.stripe_secret_key is not None
+    assert s.stripe_secret_key.reveal() == "sk_test_x"
 
 
 def test_secret_key_hidden_in_repr(tmp_path: Path) -> None:
-    s = Settings.from_env(_env(tmp_path, STRIPE_SECRET_KEY="sk_test_hidden"))  # noqa: S106
+    s = Settings.from_env(
+        _env(
+            tmp_path,
+            STRIPE_SECRET_KEY="sk_test_hidden",  # noqa: S106
+            STRIPE_PAYMENT_LINK_URL="https://buy.stripe.com/test_FAKE",
+        )
+    )
     assert "sk_test_hidden" not in repr(s)
+    assert "sk_test_hidden" not in str(s)
 
 
 @pytest.mark.parametrize(
@@ -86,12 +101,23 @@ def test_invalid_names_the_variable_and_hides_the_value(
     ],
 )
 def test_public_base_url_accepted(tmp_path: Path, url: str) -> None:
-    assert Settings.from_env(_env(tmp_path, PUBLIC_BASE_URL=url)).public_base_url == url
+    assert (
+        Settings.from_env(
+            _env(tmp_path, PAYMENT_REQUIRED="false", PUBLIC_BASE_URL=url)
+        ).public_base_url
+        == url
+    )
 
 
 def test_empty_optional_values_count_as_unset(tmp_path: Path) -> None:
     s = Settings.from_env(
-        _env(tmp_path, STRIPE_PAYMENT_LINK_URL="", PUBLIC_BASE_URL="", MAX_CONCURRENT_JOBS="")
+        _env(
+            tmp_path,
+            PAYMENT_REQUIRED="false",
+            STRIPE_PAYMENT_LINK_URL="",
+            PUBLIC_BASE_URL="",
+            MAX_CONCURRENT_JOBS="",
+        )
     )
     assert s.stripe_payment_link_url is None
     assert s.max_concurrent_jobs == 2
