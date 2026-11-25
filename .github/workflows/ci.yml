@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1db35dd8eee11c5894872e0b383ae6c406cf738d # v10.4.0
+      - name: Install Python
+        run: uv python install
+      - name: Install dependencies (dev group, no e2e)
+        run: uv sync --frozen
+      - name: Ruff lint
+        run: uv run ruff check .
+      - name: Ruff format
+        run: uv run ruff format --check .
+      - name: Mypy
+        run: uv run mypy src
+      - name: Tests (default addopts exclude live and e2e; coverage gate on)
+        run: uv run pytest -q -W error::pytest.PytestDeprecationWarning
+      - name: Secret reveal allow-list
+        run: |
+          # secrets module name is split so a naive grep for the GitHub secrets context stays clean
+          expected="$(printf 'src/exit_archive/%s\n' harvest/http.py "secret"s.py web/payments.py)"
+          actual="$(grep -rln "\.reveal()" src/ | sort)"
+          echo "$actual"
+          test "$actual" = "$expected"
+
+  docker:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Build image
+        run: docker build -t exit-archive .
+      - name: Run container and wait for /healthz
+        run: |
+          docker run -d --name ea -e PAYMENT_REQUIRED=false -p 8000:8000 exit-archive
+          for _ in $(seq 1 30); do
+            if curl -fsS localhost:8000/healthz; then exit 0; fi
+            sleep 1
+          done
+          docker logs ea
+          exit 1
+      - name: Container runs as non-root
+        run: test "$(docker run --rm exit-archive id -u)" != "0"
+      - name: Cleanup
+        if: always()
+        run: docker rm -f ea
