@@ -3,7 +3,13 @@ name = "exit-archive"
 version = "0.1.0"
 description = "Export every record from a Harvest account as an offline, searchable archive."
 requires-python = ">=3.12"
-dependencies = ["httpx"]
+dependencies = [
+    "fastapi>=0.165.0",
+    "httpx",
+    "jinja2>=3.1.6",
+    "python-multipart>=0.0.34",
+    "uvicorn[standard]>=0.54.0",
+]
 
 [project.scripts]
 exit-archive = "exit_archive.cli:main"

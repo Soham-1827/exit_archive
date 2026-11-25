@@ -111,9 +111,18 @@ def sweep(store: JobStore, data_dir: Path, now: datetime) -> SweepResult:
 
 
 async def run_cleanup_loop(
-    store: JobStore, data_dir: Path, interval: float = 3600, clock: Clock = utcnow
+    store: JobStore,
+    data_dir: Path,
+    interval: float = 3600,
+    clock: Clock = utcnow,
+    initial_delay: float = 0,
 ) -> None:
-    """Sweep every ``interval`` seconds until cancelled; a failed sweep is logged and retried."""
+    """Sweep every ``interval`` seconds until cancelled; a failed sweep is logged and retried.
+
+    ``initial_delay`` postpones the first sweep (the web lifespan sweeps once itself).
+    """
+    if initial_delay > 0:
+        await asyncio.sleep(initial_delay)
     while True:
         try:
             await asyncio.to_thread(sweep, store, data_dir, clock())

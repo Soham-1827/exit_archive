@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="referrer" content="no-referrer">
+{% block refresh %}{% endblock %}
+<title>{% block title %}Exit Archive{% endblock %}</title>
+<link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+<header class="site-header">
+  <a class="brand" href="/">Exit Archive</a>
+  <nav aria-label="Main navigation">
+    <a href="/privacy">Privacy</a>
+  </nav>
+</header>
+<main id="main">
+{% block main %}{% endblock %}
+</main>
+<footer class="site-footer">
+  <p>Exit Archive is an independent tool and is not affiliated with Harvest.</p>
+  <p><a href="/privacy">How your token and data are handled</a></p>
+</footer>
+</body>
+</html>

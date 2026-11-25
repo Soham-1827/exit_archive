@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block title %}Error {{ code }} - Exit Archive{% endblock %}
+{% block main %}
+<section class="panel" aria-labelledby="err-heading">
+  <h1 id="err-heading">Error {{ code }}</h1>
+  <p role="alert">{{ message }}</p>
+  <p><a href="/">Back to the start</a></p>
+</section>
+{% endblock %}

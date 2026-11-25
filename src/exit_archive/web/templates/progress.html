@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block refresh %}{% if job.status in ("queued", "running") %}<meta http-equiv="refresh" content="3">{% endif %}{% endblock %}
+{% block title %}Your export - Exit Archive{% endblock %}
+{% block main %}
+<section class="panel" aria-labelledby="job-heading">
+  <h1 id="job-heading">Your export</h1>
+  {% if job.status == "queued" %}
+  <p role="status" class="status">Waiting to start. This page refreshes by itself.</p>
+  {% elif job.status == "running" %}
+  <p role="status" class="status">Working: {{ job.stage or "starting" }}{% if job.done is not none %}, {{ job.done }}{% if job.total %} of {{ job.total }}{% endif %} done{% endif %}.</p>
+  {% if job.total %}<progress max="{{ job.total }}" value="{{ job.done or 0 }}">{{ job.done or 0 }} of {{ job.total }}</progress>{% endif %}
+  <p class="hint">Large accounts can take several minutes. You can leave this page open; it refreshes by itself.</p>
+  {% elif job.status == "done" %}
+  <p role="status" class="status status-good">Your archive is ready.</p>
+  <p><a class="button" href="/jobs/{{ job.id }}/download">Download the zip</a></p>
+  <p class="hint">Available until {{ expires }} (UTC). After that it is deleted. Save this page's address if you want to come back.</p>
+  {% elif job.status == "failed" %}
+  <p role="alert" class="status status-bad">The export could not be completed.</p>
+  <p class="detail">{{ job.error or "Unknown error" }}</p>
+  <p>Check the token and try again from the <a href="/start">start page</a>. If you paid, the same payment link can be used again.</p>
+  {% else %}
+  <p role="status" class="status">This archive has expired and was deleted. Archives are kept for 7 days.</p>
+  {% endif %}
+</section>
+{% endblock %}

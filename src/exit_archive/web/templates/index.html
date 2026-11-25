@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Exit Archive: keep every Harvest record{% endblock %}
+{% block main %}
+<section class="hero" aria-labelledby="hero-heading">
+  <p class="eyebrow">For Harvest accounts that are closing</p>
+  <h1 id="hero-heading">Every record you ever made, in one archive you can keep.</h1>
+  <p class="lede">Paste a Harvest personal access token. We read your account once, build the archive, and hand you a zip file that opens offline.</p>
+  <div class="cta">
+    {% if buy_url %}
+    <a class="button" href="{{ buy_url }}">Buy the export, $49</a>
+    {% else %}
+    <p class="note" role="status">Purchase is not open yet. Please check back soon.</p>
+    {% endif %}
+    <p class="price-note">One account, one payment of $49. No subscription.</p>
+  </div>
+</section>
+
+<section class="panel" aria-labelledby="get-heading">
+  <h2 id="get-heading">What you get</h2>
+  <ul class="ledger">
+    <li><strong>Records</strong> <span>Clients, projects, tasks, time entries, expenses, invoices and estimates as CSV and JSON.</span></li>
+    <li><strong>Receipts</strong> <span>The original image or PDF attached to every expense.</span></li>
+    <li><strong>Invoice and estimate PDFs</strong> <span>One PDF for each document, as your clients saw it.</span></li>
+    <li><strong>Offline viewer</strong> <span>Open <code>index.html</code> to browse and search everything. No internet needed.</span></li>
+    <li><strong>Checksummed manifest</strong> <span>A <code>MANIFEST.json</code> with counts and a SHA-256 for every file, so you can verify the archive is complete.</span></li>
+  </ul>
+</section>
+
+<section class="panel panel-quiet" aria-labelledby="privacy-heading">
+  <h2 id="privacy-heading">Privacy in short</h2>
+  <ul class="plain">
+    <li>Your token is used in memory for one export job only. It is never stored.</li>
+    <li>The finished archive is deleted after 7 days.</li>
+  </ul>
+  <p><a href="/privacy">Read the full privacy page</a></p>
+</section>
+{% endblock %}

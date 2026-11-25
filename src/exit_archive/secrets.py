@@ -66,14 +66,57 @@ def _redact_all(text: str, tokens: tuple[HarvestToken, ...]) -> str:
     return _BEARER.sub(_MASK, text)
 
 
-def _scrub_record(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) -> None:
-    """Scrub the token values and bearer credentials from a record in place."""
+def _has_secret(text: str, tokens: tuple[HarvestToken, ...]) -> bool:
+    return bool(_BEARER.search(text)) or any(t.reveal() in text for t in tokens)
+
+
+def _scrub_value(value: object, tokens: tuple[HarvestToken, ...]) -> object:
+    """Redact a str, or a non-str whose ``str()`` holds a secret; anything else is kept."""
+    if isinstance(value, str):
+        return _redact_all(value, tokens)
+    try:
+        text = str(value)
+    except Exception:  # noqa: BLE001 - an arg that cannot render is left for the fallback
+        return value
+    return _redact_all(text, tokens) if _has_secret(text, tokens) else value
+
+
+def _scrub_args(args: object, tokens: tuple[HarvestToken, ...]) -> object:
+    """Redact args in place: same tuple length and order, or the mapping's same keys."""
+    if isinstance(args, tuple):
+        return tuple(_scrub_value(a, tokens) for a in args)
+    if isinstance(args, dict):
+        return {k: _scrub_value(v, tokens) for k, v in args.items()}
+    return args
+
+
+def _scrub_message(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) -> None:
+    """Redact msg/args without changing the record's shape when that is possible."""
     try:
         message = record.getMessage()
     except (TypeError, ValueError, KeyError):
-        message = f"{record.msg!s} args={record.args!r}"
-    record.msg = _redact_all(message, tokens)
-    record.args = ()
+        record.msg = _redact_all(f"{record.msg!s} args={record.args!r}", tokens)
+        record.args = ()
+        return
+    if not _has_secret(message, tokens):
+        return  # nothing to hide: formatters that read record.args keep working
+    original = (record.msg, record.args)
+    if isinstance(record.msg, str):
+        record.msg = _redact_all(record.msg, tokens)
+    record.args = _scrub_args(record.args, tokens)  # type: ignore[assignment]
+    try:
+        rendered = record.getMessage()
+    except Exception:  # noqa: BLE001 - any rendering failure means "pre-format instead"
+        rendered = None
+    if rendered is None or _has_secret(rendered, tokens):
+        record.msg, record.args = original
+        record.msg = _redact_all(message, tokens)  # e.g. a token split across msg and args
+        record.args = ()
+
+
+def _scrub_record(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) -> None:
+    """Scrub the token values and bearer credentials from a record in place."""
+    _scrub_message(record, tokens)
     if record.exc_info and not record.exc_text:
         record.exc_text = logging.Formatter().formatException(record.exc_info)
     if record.exc_text:

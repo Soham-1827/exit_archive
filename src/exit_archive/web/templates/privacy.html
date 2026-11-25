@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Privacy - Exit Archive{% endblock %}
+{% block main %}
+<section class="panel prose" aria-labelledby="priv-heading">
+  <p class="draft" role="note">Draft wording, pending approval.</p>
+  <h1 id="priv-heading">Privacy</h1>
+  <h2>Your Harvest token</h2>
+  <p>You paste a Harvest personal access token so we can read your account. We hold it in memory while your export runs, and then we discard it. We never write it to disk, to a database, to logs or into your archive.</p>
+  <h2>Your archive</h2>
+  <p>The finished zip is stored on our server so you can download it. The link is private and cannot be guessed. We delete the archive 7 days after it is ready, and the job record keeps only a status.</p>
+  <h2>What we do not do</h2>
+  <ul>
+    <li>We do not use analytics or advertising trackers.</li>
+    <li>We do not sell, share or read your data.</li>
+    <li>We do not keep a copy of your Harvest records after the archive is deleted.</li>
+  </ul>
+  <h2>Payment</h2>
+  <p>Payments are handled by Stripe. We receive a payment confirmation but never your card details.</p>
+  <h2>Delete the token afterwards</h2>
+  <p>When your export is done, delete the token in Harvest under Harvest ID, then Developers.</p>
+</section>
+{% endblock %}

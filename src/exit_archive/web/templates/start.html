@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Start your export - Exit Archive{% endblock %}
+{% block main %}
+<section class="panel" aria-labelledby="start-heading">
+  <h1 id="start-heading">Start your export</h1>
+  <form method="post" action="/jobs" autocomplete="off">
+    {% if session_id %}<input type="hidden" name="session_id" value="{{ session_id }}">{% endif %}
+    <div class="field">
+      <label for="token">Harvest personal access token</label>
+      <input id="token" name="token" type="password" autocomplete="off" required maxlength="512" spellcheck="false" autocapitalize="off" aria-describedby="token-help">
+      <p id="token-help" class="hint">Used in memory for this one export, then discarded. It is never stored.</p>
+    </div>
+    <div class="field">
+      <label for="account_id">Account ID <span class="optional">(optional)</span></label>
+      <input id="account_id" name="account_id" type="text" inputmode="numeric" pattern="[0-9]*" maxlength="18" autocomplete="off" aria-describedby="account-help">
+      <p id="account-help" class="hint">Only needed if your token can see more than one Harvest account.</p>
+    </div>
+    <button class="button" type="submit">Build my archive</button>
+  </form>
+</section>
+
+<section class="panel panel-quiet" aria-labelledby="help-heading">
+  <h2 id="help-heading">Where to find a token</h2>
+  <ol>
+    <li>Sign in to Harvest and open the Harvest ID developer page (Harvest ID, then Developers).</li>
+    <li>Choose <strong>Create new personal access token</strong> and give it any name.</li>
+    <li>Copy the token and paste it above.</li>
+  </ol>
+  <p class="hint">When your export is finished you can delete the token from the same page.</p>
+</section>
+{% endblock %}

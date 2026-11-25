@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. Planned hours used: 18 of 28. T3.2 in progress. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
+Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. T3.2 (FastAPI web app: landing, token form, progress, download, privacy draft; payment seam fails closed) passed after one fix loop, which also fixed log redaction so it keeps `record.args` intact (uvicorn access logs work); 750 tests. Planned hours used: 20.5 of 28. T3.3 (Stripe verification, mocks only) in progress. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
 
 ## What exists
 - `CLAUDE.md`, `docs/BRIEF.md`, `.claude/agents/*.md`, `.claude/commands/pipeline.md` — project rules, brief, agent roles, `/pipeline` loop
@@ -33,6 +33,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `src/exit_archive/archive/paths.py` — `receipt_file_name()`, `pdf_file_name()`, `RECEIPT_DIR`, `MAX_NUMBER_LEN`: one place for downloaded-file names (used by `harvest/files.py` and the viewer)
 - `src/exit_archive/viewer/bundle.py` — `build_viewer_data(work_dir, company_name=None)` → `data/viewer-data.js` (`window.EXIT_ARCHIVE_DATA = {...};`, flat slim schema in the module docstring, `<>&` U+2028/9 escaped, paths only for files that exist); reads JSON via `archive.writer.iter_json_records()` one record at a time. Not yet wired into the exporter (T2.2.3)
 - `src/exit_archive/viewer/__init__.py` + `viewer/index.html` — `build_viewer(work_dir, company_name)` writes `index.html` + `data/viewer-data.js`; called in `_export_into()` after `writer.close()`, before `write_manifest()`. Vanilla JS, `textContent` only, CSP by sha256 hash (+ `'self' file:` for the data script), hrefs only for `^(receipts|invoices|estimates)/[A-Za-z0-9._-]+$`
+- `src/exit_archive/web/` — `app.py` (`create_app(settings, export, payments)`, module-level `app`; routes `/`, `/start`, `POST /jobs`, `/jobs/{id}`, `/jobs/{id}/download`, `/healthz`, `/privacy`; custom 4xx/5xx handlers that never echo input; lifespan wires redaction, store, recovery, one sweep, cleanup loop), `settings.py` (`Settings.from_env`), `forms.py` (token ≤ 512, account id digits, session id), `payments.py` (`PaymentVerifier` protocol, `AllowAllVerifier`), `templates/`, `static/app.css` (no inline script/style)
 - `src/exit_archive/cli.py` — `exit-archive export --out DIR [--account-id ID]`:
   - exit codes: 0 ok, 2 usage, 3 auth, 4 other error, 130 interrupted
   - installs log redaction and pins httpx/httpcore to WARNING
@@ -41,13 +42,13 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 
 ## How to run, test, deploy
 - Install: `uv sync` (only when dependencies change; Python 3.12 via `uv python install 3.12` if missing)
-- Test: `uv run --offline pytest -q -W error::pytest.PytestDeprecationWarning` (607 tests, coverage gate 80 %; `e2e` and `live` deselected by default)
+- Test: `uv run --offline pytest -q -W error::pytest.PytestDeprecationWarning` (750 tests, coverage gate 80 %; `e2e` and `live` deselected by default)
 - Lint/types: `uv run --offline ruff check . && uv run --offline ruff format --check . && uv run --offline mypy src`
-- Token grep: `grep -rln "\.reveal()" src/` must list only `secrets.py` and `harvest/http.py`
+- Token grep: `grep -rln "\.reveal()" src/` must list only `secrets.py` and `harvest/http.py` (from T3.3 on, also `web/payments.py` for the Stripe key)
 - Viewer e2e (optional): `uv sync --group e2e` once (network), `uv run --offline --group e2e playwright install chromium`, then `uv run --offline --group e2e pytest -m e2e -q`. Skips cleanly without Playwright/Chromium
 - Live test (**only with the user's yes**): `uv run --offline pytest -m live -q`
 - CLI (**only with the user's yes for the live token**): `set -a; . ~/.harvest_test; set +a; uv run --offline exit-archive export --out ./tmp/out`
-- Web (after T3.2): `PAYMENT_REQUIRED=false DATA_DIR=./tmp uv run --offline uvicorn exit_archive.web.app:app`
+- Web: `PAYMENT_REQUIRED=false DATA_DIR=./tmp/web uv run --offline uvicorn exit_archive.web.app:app --port 8765`, then open `http://localhost:8765/`
 - Deploy: not yet. `docs/DEPLOY.md` arrives with T4.4/T4.5.
 - Push: plain `git push` over HTTPS (`gh` is not installed)
 
@@ -70,7 +71,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 
 ## Open decisions for the user
 - **D1 Hosting — decided 2026-11-25: Render.** Blueprint `render.yaml` (T4.5), Starter service + 10 GB disk (~$10/mo). The user is installing the Render GitHub App; creating the service needs a separate yes.
-- **D2 Payments — decided 2026-11-25: Stripe Payment Link at $49.** Still to ask the user, step by step: Stripe account, product + Payment Link (success URL needs the Render host), a restricted test-mode key, and later live keys.
+- **D2 Payments — decided 2026-11-25: Stripe Payment Link at $49.** The code needs no account. The exact Stripe steps for the user (test mode first, at T4.6) are in TODO.md → Blocked / needs the user → D2.
 - **D3 Domain**: optional (~$12/yr).
 - **D4 Tokens that see several accounts**: I recommend an optional Account ID field that fails with the account list when ambiguous. The CLI already behaves this way.
 - **D5 Privacy page wording**: approve it before launch.
@@ -78,9 +79,9 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - **Trial token**: I recommend keeping it until T4.6 (the launch check runs a real export), then revoking it in Harvest → Developers. If you'd rather revoke it now, create a fresh one for T4.6.
 
 ## Next 3 tasks
-1. **T3.2 Web routes and pages (executor, dispatched 2026-11-25):** T3.2.0 adds fastapi/uvicorn/jinja2/python-multipart (network once); `create_app()` factory; payment seam that fails closed; custom 422/HTTP/500 handlers; lifespan wires redaction, store, recovery and the cleanup loop.
-2. **T3.3 Stripe gate (executor):** respx only; no Stripe account needed yet. Implements the `PaymentVerifier` from T3.2.1a.
-3. **T4.1 Dockerfile, T4.2 CI, T4.3 hardening, T4.4 DEPLOY.md (deployer):** no user input needed. Then T4.5 (Render Blueprint) and T4.6 (launch check): ask the user before each account, key or paid step.
+1. **T3.3 Stripe gate (executor, dispatched 2026-11-25):** `StripeVerifier` against respx mocks only; Stripe key as a redacted secret; `/start` verifies before the token form.
+2. **T4.1 Dockerfile + T4.2 CI (deployer):** no user input needed. The Docker daemon was down last time; the report must say if `docker build` could not run.
+3. **T4.3 hardening + T4.4 DEPLOY.md (deployer):** headers, body limit, rate limit, Origin check, access log without query strings, `Bearer%20` scrubbing. Then T4.5 (Render Blueprint) and T4.6 (launch check, Stripe test mode): ask the user before each account, key or paid step.
 
 ## Gotchas
 - **Agent rules**
@@ -113,4 +114,4 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`: config, not secret. T3.2 adds the names to `.env.example`.
 
 ## Last updated
-2026-11-25. Last commit: 2720b09 (T2.2). T3.1 + these doc edits are about to be committed together; T3.2 dispatched next.
+2026-11-25. Last commit: de78e41 (T3.1). T3.2 + these doc edits are about to be committed together; T3.3 dispatched next.
