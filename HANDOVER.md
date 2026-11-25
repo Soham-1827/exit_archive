@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. T3.2 (FastAPI web app: landing, token form, progress, download, privacy draft; payment seam fails closed) passed after one fix loop, which also fixed log redaction so it keeps `record.args` intact (uvicorn access logs work); 750 tests. Phase 3 done 2026-11-25: T3.3 (Stripe Checkout Session verification, respx mocks only, Stripe key as a redacted `Secret`) passed first time; 889 tests. Planned hours used: 22 of 28. T4.1+T4.2 (Docker, CI) in progress with the deployer. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
+Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. T3.2 (FastAPI web app: landing, token form, progress, download, privacy draft; payment seam fails closed) passed after one fix loop, which also fixed log redaction so it keeps `record.args` intact (uvicorn access logs work); 750 tests. Phase 3 done 2026-11-25: T3.3 (Stripe Checkout Session verification, respx mocks only, Stripe key as a redacted `Secret`) passed first time; 889 tests. T4.1+T4.2 done: Dockerfile (pinned digests, non-root uid 10001, `$PORT`) and GitHub Actions CI (lint, types, tests, reveal grep, docker build + `/healthz` smoke), green on main. Planned hours used: 24 of 28. T4.3 (hardening) in progress with the executor. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
 
 ## What exists
 - `CLAUDE.md`, `docs/BRIEF.md`, `.claude/agents/*.md`, `.claude/commands/pipeline.md` — project rules, brief, agent roles, `/pipeline` loop
@@ -38,6 +38,8 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
   - exit codes: 0 ok, 2 usage, 3 auth, 4 other error, 130 interrupted
   - installs log redaction and pins httpx/httpcore to WARNING
   - never prints a traceback
+- `Dockerfile`, `.dockerignore` — multi-stage uv build on `python:3.12-slim@sha256:…`, uv 0.12.11 pinned, non-root uid 10001 owning `/data`, `CMD sh -c "exec uvicorn … --port ${PORT:-8000} --workers 1 --proxy-headers"`
+- `.github/workflows/ci.yml` — on push to main and PRs: `test` job (ruff, format, mypy, pytest with the coverage gate, `.reveal()` allow-list over `*.py`) and `docker` job (build, `/healthz` smoke, non-root check); actions pinned by SHA; no secrets
 - `tests/` — unit, respx and adversarial suites per module (`tests/harvest/`, `tests/archive/`, `tests/test_*.py`). `tests/live/test_live_export.py` is marked `live`; it uses the `harvest_live_credentials` fixture in `tests/conftest.py` and copies the zip to `./tmp/live/` only when `EXIT_ARCHIVE_KEEP_LIVE_ZIP=1`.
 
 ## How to run, test, deploy
@@ -49,7 +51,8 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - Live test (**only with the user's yes**): `uv run --offline pytest -m live -q`
 - CLI (**only with the user's yes for the live token**): `set -a; . ~/.harvest_test; set +a; uv run --offline exit-archive export --out ./tmp/out`
 - Web: `PAYMENT_REQUIRED=false DATA_DIR=./tmp/web uv run --offline uvicorn exit_archive.web.app:app --port 8765`, then open `http://localhost:8765/`
-- Deploy: not yet. `docs/DEPLOY.md` arrives with T4.4/T4.5.
+- CI: `curl -s "https://api.github.com/repos/Soham-1827/exit_archive/actions/runs?per_page=1"` → check `conclusion` (repo is public)
+- Deploy: not yet. `docs/DEPLOY.md` and `render.yaml` arrive with T4.4/T4.5; creating the Render service needs the user's yes.
 - Push: plain `git push` over HTTPS (`gh` is not installed)
 
 ## Decisions made
@@ -80,9 +83,9 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - **Trial token**: I recommend keeping it until T4.6 (the launch check runs a real export), then revoking it in Harvest → Developers. If you'd rather revoke it now, create a fresh one for T4.6.
 
 ## Next 3 tasks
-1. **T4.1 Dockerfile + T4.2 CI (deployer, dispatched 2026-11-25):** Docker daemon is down locally, so the CI `docker` job is the build proof after push; check the run with `curl` on the GitHub API.
-2. **T4.3 hardening (deployer):** headers, 16 KB body limit, per-IP rate limit, Origin check, access log without query strings, `Bearer%20` scrubbing, `Secret.__getstate__` (T4.3.4).
-3. **T4.4 DEPLOY.md (deployer)**, then T4.5 Render Blueprint (ask the user before creating anything) and T4.6 launch check (Stripe test-mode steps in TODO.md → D2; D5 privacy wording; D6 support email).
+1. **T4.3 hardening (executor, dispatched 2026-11-25):** headers, 16 KB body limit, rate limit keyed via `TRUSTED_PROXY_HOPS`, Origin check, own access log (path only, job ids masked), `Bearer%20` scrubbing, `Secret.__getstate__`.
+2. **T4.4 DEPLOY.md + T4.5.1 `render.yaml` (deployer):** prepare in the repo only; no Render service until the user says yes.
+3. **T4.5.2 first deploy and T4.6 launch check:** each needs the user, step by step (Render service + disk, Stripe test mode per TODO D2, D5 privacy wording, D6 support email).
 
 ## Gotchas
 - **Agent rules**
@@ -95,7 +98,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
   - The kept zip with trial data is `tmp/live/exit-archive-personal-20261124.zip`, gitignored. Never stage `tmp/`.
 - **Environment**
   - Use `uv run --offline …`; plain `uv run` stalled over 120 s re-resolving dependencies.
-  - The Docker daemon was down when checked, so the deployer must say if `docker build` can't be verified.
+  - The Docker daemon is down locally (still on 2026-11-25); the CI `docker` job is the build proof.
   - `gh` is not installed; check CI with `curl` on the GitHub API.
   - WSL on `/mnt/d` (NTFS) shows permission bits as 777, so don't rely on chmod in tests.
 - **Code ordering**
@@ -116,4 +119,4 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`: config, not secret. T3.2 adds the names to `.env.example`.
 
 ## Last updated
-2026-11-25. Last commit: b8257a1 (T3.2). T3.3 + these doc edits are about to be committed together; T4.1+T4.2 dispatched next.
+2026-11-25. Last commit: cfe1de3 (CI reveal-grep fix; CI green). These doc edits go into the T4.3 commit; T4.3 dispatched next.
