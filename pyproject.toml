@@ -24,6 +24,9 @@ dev = [
     "ruff",
     "mypy",
 ]
+e2e = [
+    "playwright>=1.65.2",
+]
 
 [tool.ruff]
 line-length = 100
@@ -43,5 +46,8 @@ files = ["src"]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 asyncio_default_fixture_loop_scope = "function"
-markers = ["live: tests that call the real Harvest API (skipped by default)"]
-addopts = "-m 'not live' --cov=exit_archive --cov-report=term-missing --cov-fail-under=80"
+markers = [
+    "live: tests that call the real Harvest API (skipped by default)",
+    "e2e: browser tests that need the optional e2e dependency group (skipped by default)",
+]
+addopts = "-m 'not live and not e2e' --cov=exit_archive --cov-report=term-missing --cov-fail-under=80"

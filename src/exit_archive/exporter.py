@@ -27,6 +27,7 @@ from exit_archive.harvest.resources import (
     skipped_resources,
 )
 from exit_archive.secrets import HarvestToken
+from exit_archive.viewer import build_viewer
 
 Progress = Callable[[str, int, int | None], None]
 RECORD_PROGRESS_EVERY = 500
@@ -146,6 +147,7 @@ async def _export_into(
     missing += files.missing
     writer.write_readme()
     writer.close()
+    build_viewer(work_dir, company.name)
     counts = writer.counts()
     skipped = skipped_resources(company)
     report("archive", 0, 1)

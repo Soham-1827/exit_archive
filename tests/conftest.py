@@ -53,9 +53,9 @@ def harvest_live_credentials() -> LiveCredentials:
 
 
 def pytest_configure(config: pytest.Config) -> None:
-    """Live-only runs select no unit tests, so the coverage gate is meaningless there."""
+    """Live-only and e2e-only runs select no unit tests, so the coverage gate is meaningless."""
     expr = config.getoption("markexpr", default="") or ""
-    if expr.strip() == "live":
+    if expr.strip() in ("live", "e2e"):
         config.option.cov_fail_under = 0
         plugin = config.pluginmanager.get_plugin("_cov")
         if plugin is not None:

@@ -1,0 +1,741 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'sha256-6bX46dL57ZqvFWfkV28w4mAYGe4XIkQiiPnMs8qRh9w=' 'self' file:; style-src 'sha256-qD5oW/61Bf3DSRijuvNlfyx2ECSKjLicZruMMNbcazU='; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>Exit Archive</title>
+<style>
+:root {
+  --paper: #f4f1e9;
+  --surface: #fffdf8;
+  --ink: #1c2227;
+  --muted: #5b666e;
+  --rule: #d8d2c3;
+  --rule-strong: #b9b1a0;
+  --accent: #0d5c58;
+  --accent-ink: #ffffff;
+  --accent-soft: #dcebe7;
+  --focus: #b4540a;
+  --good: #1f6b3a;
+  --good-soft: #dff0e3;
+  --warn: #8a5300;
+  --warn-soft: #fbebc9;
+  --idle: #4f5a62;
+  --idle-soft: #e9e6dd;
+  --bad: #9b2c2c;
+  --bad-soft: #f6dcda;
+  --font-ui: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-display: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia, "Times New Roman", serif;
+  --font-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.875rem;
+  --space-4: 1.5rem;
+  --space-5: 2.5rem;
+  --radius: 6px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --paper: #14181b;
+    --surface: #1b2125;
+    --ink: #e9e5da;
+    --muted: #9aa6ae;
+    --rule: #2d373d;
+    --rule-strong: #46535b;
+    --accent: #5fc4b8;
+    --accent-ink: #0b1514;
+    --accent-soft: #1b3431;
+    --focus: #f0a35a;
+    --good: #8fd6a2;
+    --good-soft: #1c3526;
+    --warn: #f0c66f;
+    --warn-soft: #3a2f14;
+    --idle: #aab4bb;
+    --idle-soft: #262e33;
+    --bad: #f2a3a0;
+    --bad-soft: #3d2222;
+  }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--paper);
+  color: var(--ink);
+  font: 15px/1.5 var(--font-ui);
+}
+.skip {
+  position: absolute;
+  left: var(--space-3);
+  top: -4rem;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  z-index: 10;
+}
+.skip:focus { top: var(--space-2); }
+:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.masthead {
+  border-top: 6px solid var(--accent);
+  background: var(--surface);
+  border-bottom: 1px solid var(--rule);
+  padding: var(--space-4) max(1rem, 4vw) var(--space-3);
+}
+.eyebrow {
+  margin: 0 0 var(--space-1);
+  font-size: 0.75rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+  font-weight: 700;
+}
+.masthead h1 {
+  margin: 0;
+  font: 600 clamp(1.7rem, 1.1rem + 2.6vw, 2.9rem)/1.1 var(--font-display);
+  letter-spacing: -0.01em;
+  overflow-wrap: anywhere;
+}
+.meta { margin: var(--space-2) 0 0; color: var(--muted); font-size: 0.875rem; }
+main { padding: var(--space-4) max(1rem, 4vw) var(--space-5); max-width: 96rem; margin: 0 auto; }
+.notice {
+  border: 1px solid var(--bad);
+  background: var(--bad-soft);
+  color: var(--ink);
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius);
+  max-width: 44rem;
+}
+.notice[hidden], [hidden] { display: none !important; }
+.tabs {
+  display: flex;
+  gap: var(--space-1);
+  overflow-x: auto;
+  border-bottom: 2px solid var(--rule);
+  margin-bottom: var(--space-4);
+}
+.tab {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  padding: var(--space-2) var(--space-3);
+  font: 600 0.9375rem var(--font-ui);
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tab:hover { color: var(--ink); }
+.tab[aria-selected="true"] { color: var(--accent); border-bottom-color: var(--accent); }
+.tab .count {
+  font: 500 0.75rem var(--font-mono);
+  margin-left: var(--space-1);
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: var(--idle-soft);
+  color: var(--idle);
+}
+.tab[aria-selected="true"] .count { background: var(--accent-soft); color: var(--accent); }
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  margin-bottom: var(--space-3);
+}
+@media (max-width: 720px) { .toolbar { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); } .field-search { grid-column: 1 / -1; } }
+.field { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; }
+.field label {
+  font-size: 0.6875rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.field input, .field select {
+  width: 100%;
+  min-width: 0;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface);
+  border: 1px solid var(--rule-strong);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.625rem;
+  min-height: 2.5rem;
+}
+.field input:disabled, .field select:disabled { opacity: 0.45; cursor: not-allowed; background: var(--idle-soft); }
+.field input:focus-visible, .field select:focus-visible { outline-offset: 0; border-color: var(--focus); }
+.btn {
+  font: 600 0.875rem var(--font-ui);
+  color: var(--accent);
+  background: var(--surface);
+  border: 1px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 0.5rem 0.9rem;
+  min-height: 2.5rem;
+  cursor: pointer;
+}
+.btn:hover:not(:disabled) { background: var(--accent); color: var(--accent-ink); }
+.btn:active:not(:disabled) { transform: translateY(1px); }
+.btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  align-items: baseline;
+  margin: var(--space-3) 0;
+  padding: var(--space-3) var(--space-4);
+  background: var(--accent-soft);
+  border-left: 4px solid var(--accent);
+  border-radius: 0 var(--radius) var(--radius) 0;
+}
+.stat { color: var(--muted); font-size: 0.875rem; }
+.stat b { color: var(--ink); font: 600 1.375rem var(--font-mono); font-variant-numeric: tabular-nums; margin-right: var(--space-1); }
+.table-wrap {
+  overflow-x: auto;
+  background: var(--surface);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+}
+table { width: 100%; border-collapse: collapse; }
+.sr-only {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+th {
+  position: sticky;
+  top: 0;
+  background: var(--surface);
+  text-align: left;
+  font-size: 0.6875rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border-bottom: 2px solid var(--rule-strong);
+  padding: 0;
+  white-space: nowrap;
+}
+th.num, td.num { text-align: right; }
+.sort {
+  appearance: none;
+  background: none;
+  border: 0;
+  width: 100%;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  color: inherit;
+  text-align: inherit;
+  padding: var(--space-3) var(--space-3);
+  cursor: pointer;
+}
+.sort:hover { color: var(--ink); }
+th[aria-sort="ascending"] .sort::after { content: " \2191"; color: var(--accent); }
+th[aria-sort="descending"] .sort::after { content: " \2193"; color: var(--accent); }
+th[aria-sort="ascending"], th[aria-sort="descending"] { color: var(--ink); }
+td {
+  padding: 0.55rem var(--space-3);
+  border-bottom: 1px solid var(--rule);
+  vertical-align: top;
+  overflow-wrap: anywhere;
+}
+td.notes { min-width: 16rem; max-width: 36rem; color: var(--muted); }
+td.num { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.date { font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+td.name { font-weight: 600; }
+tbody tr:hover { background: var(--accent-soft); }
+tbody tr:last-child td { border-bottom: 0; }
+td a { color: var(--accent); font-weight: 600; text-underline-offset: 3px; }
+td a:hover { text-decoration-thickness: 2px; }
+.dash { color: var(--rule-strong); }
+.chip {
+  display: inline-block;
+  padding: 1px 9px;
+  border-radius: 99px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-transform: capitalize;
+  background: var(--idle-soft);
+  color: var(--idle);
+}
+.chip.good { background: var(--good-soft); color: var(--good); }
+.chip.warn { background: var(--warn-soft); color: var(--warn); }
+.chip.bad { background: var(--bad-soft); color: var(--bad); }
+.empty { padding: var(--space-5) var(--space-4); text-align: center; color: var(--muted); }
+.pager {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  margin-top: var(--space-3);
+}
+.page-info { color: var(--muted); font-size: 0.875rem; font-variant-numeric: tabular-nums; }
+@media (max-width: 720px) {
+  thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  table, tbody, tr, td { display: block; width: 100%; }
+  tbody tr { padding: var(--space-2) 0; border-bottom: 3px solid var(--rule); }
+  td { display: flex; gap: var(--space-3); justify-content: space-between; border-bottom: 0; padding: 0.25rem var(--space-3); }
+  td::before {
+    content: attr(data-label);
+    flex: 0 0 6.5rem;
+    font-size: 0.6875rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding-top: 0.2rem;
+    text-align: left;
+  }
+  td.num, td.notes { text-align: right; min-width: 0; max-width: none; }
+  td > * { text-align: right; min-width: 0; }
+}
+</style>
+</head>
+<body>
+<a class="skip" href="#results">Skip to results</a>
+<header class="masthead">
+  <p class="eyebrow">Exit Archive &middot; Harvest export</p>
+  <h1 id="company">Harvest archive</h1>
+  <p class="meta" id="generated"></p>
+</header>
+<main>
+  <div class="notice" id="empty-state" role="alert" hidden>
+    <strong>The archive data could not be loaded.</strong>
+    <span> Keep <code>index.html</code> next to the <code>data</code> folder and make sure <code>data/viewer-data.js</code> is present, then reload this page.</span>
+  </div>
+  <div id="app" hidden>
+    <div class="tabs" id="tabs" role="tablist" aria-label="Record types">
+      <button class="tab" role="tab" type="button" data-tab="time_entries">Time entries<span class="count"></span></button>
+      <button class="tab" role="tab" type="button" data-tab="invoices">Invoices<span class="count"></span></button>
+      <button class="tab" role="tab" type="button" data-tab="estimates">Estimates<span class="count"></span></button>
+      <button class="tab" role="tab" type="button" data-tab="expenses">Expenses<span class="count"></span></button>
+      <button class="tab" role="tab" type="button" data-tab="clients">Clients<span class="count"></span></button>
+      <button class="tab" role="tab" type="button" data-tab="projects">Projects<span class="count"></span></button>
+    </div>
+    <div class="toolbar" role="search" aria-label="Filter records">
+      <div class="field field-search"><label for="search">Search</label><input id="search" type="search" autocomplete="off" placeholder="Search notes, names, numbers"></div>
+      <div class="field"><label for="filter-client">Client</label><select id="filter-client"></select></div>
+      <div class="field"><label for="filter-project">Project</label><select id="filter-project"></select></div>
+      <div class="field"><label for="filter-from">From</label><input id="filter-from" type="date"></div>
+      <div class="field"><label for="filter-to">To</label><input id="filter-to" type="date"></div>
+      <div class="field"><label for="filter-invoice">Invoice number</label><input id="filter-invoice" type="text" autocomplete="off" placeholder="e.g. INV-001"></div>
+      <div class="field"><button class="btn" id="reset" type="button">Clear filters</button></div>
+    </div>
+    <div class="summary" id="summary" aria-live="polite"></div>
+    <div id="results" class="table-wrap" tabindex="0" role="region" aria-label="Results">
+      <table>
+        <caption class="sr-only" id="caption"></caption>
+        <thead id="head"></thead>
+        <tbody id="rows"></tbody>
+      </table>
+      <p class="empty" id="no-results" hidden>No records match the current search and filters.</p>
+    </div>
+    <nav class="pager" aria-label="Pages">
+      <button class="btn" id="prev" type="button">&larr; Previous</button>
+      <span class="page-info" id="page-info" aria-live="polite"></span>
+      <button class="btn" id="next" type="button">Next &rarr;</button>
+    </nav>
+  </div>
+</main>
+<script src="data/viewer-data.js"></script>
+<script>
+"use strict";
+(function () {
+  var PAGE_SIZE = 200;
+  var SAFE_PATH = /^(receipts|invoices|estimates)\/[A-Za-z0-9._-]+$/;
+  var STATE_TONE = {
+    paid: "good", accepted: "good", open: "warn", sent: "warn", draft: "", closed: "",
+    declined: "bad", void: "bad", overdue: "bad"
+  };
+  var TABS = {
+    time_entries: {
+      label: "Time entries", client: "client_id", project: "project_id", date: "date", invoice: true,
+      sort: { key: "date", dir: -1 },
+      cols: [
+        { k: "date", h: "Date", t: "date" }, { k: "client_name", h: "Client", t: "name" },
+        { k: "project_name", h: "Project" }, { k: "task_name", h: "Task" },
+        { k: "user_name", h: "Person" }, { k: "hours", h: "Hours", t: "hours" },
+        { k: "notes", h: "Notes", t: "notes" }, { k: "billable", h: "Billable", t: "bool" },
+        { k: "invoice_ref", h: "Invoice" }
+      ],
+      total: { k: "hours", h: "hours", extra: { k: "hours", h: "billable hours", when: "billable" } }
+    },
+    invoices: {
+      label: "Invoices", client: "client_id", date: "issue_date", invoice: true,
+      sort: { key: "issue_date", dir: -1 },
+      cols: [
+        { k: "number", h: "Number", t: "name" }, { k: "client_name", h: "Client" },
+        { k: "issue_date", h: "Issued", t: "date" }, { k: "due_date", h: "Due", t: "date" },
+        { k: "amount", h: "Amount", t: "money" }, { k: "state", h: "State", t: "state" },
+        { k: "pdf", h: "PDF", t: "file", label: "PDF" }
+      ],
+      total: { k: "amount", h: "invoiced" }
+    },
+    estimates: {
+      label: "Estimates", client: "client_id", date: "issue_date",
+      sort: { key: "issue_date", dir: -1 },
+      cols: [
+        { k: "number", h: "Number", t: "name" }, { k: "client_name", h: "Client" },
+        { k: "issue_date", h: "Issued", t: "date" }, { k: "amount", h: "Amount", t: "money" },
+        { k: "state", h: "State", t: "state" }, { k: "pdf", h: "PDF", t: "file", label: "PDF" }
+      ],
+      total: { k: "amount", h: "estimated" }
+    },
+    expenses: {
+      label: "Expenses", client: "client_id", project: "project_id", date: "date",
+      sort: { key: "date", dir: -1 },
+      cols: [
+        { k: "date", h: "Date", t: "date" }, { k: "client_name", h: "Client" },
+        { k: "project_name", h: "Project" }, { k: "category_name", h: "Category" },
+        { k: "amount", h: "Amount", t: "money" }, { k: "notes", h: "Notes", t: "notes" },
+        { k: "receipt", h: "Receipt", t: "file", label: "Receipt" }
+      ],
+      total: { k: "amount", h: "spent" }
+    },
+    clients: {
+      label: "Clients", client: "id",
+      sort: { key: "name", dir: 1 },
+      cols: [
+        { k: "name", h: "Name", t: "name" }, { k: "currency", h: "Currency" },
+        { k: "is_active", h: "Active", t: "bool" }
+      ]
+    },
+    projects: {
+      label: "Projects", client: "client_id", project: "id",
+      sort: { key: "name", dir: 1 },
+      cols: [
+        { k: "name", h: "Name", t: "name" }, { k: "code", h: "Code" },
+        { k: "client_name", h: "Client" }, { k: "is_active", h: "Active", t: "bool" }
+      ]
+    }
+  };
+  var ORDER = ["time_entries", "invoices", "estimates", "expenses", "clients", "projects"];
+
+  var data = window.EXIT_ARCHIVE_DATA;
+  var $ = function (id) { return document.getElementById(id); };
+  if (!data || typeof data !== "object") {
+    $("empty-state").hidden = false;
+    return;
+  }
+  $("app").hidden = false;
+
+  var state = {
+    tab: "time_entries", page: 0, query: "", client: "", project: "", from: "", to: "", invoice: "",
+    sort: { key: "date", dir: -1 }
+  };
+  var prepared = {};
+  var invoiceNumbers = {};
+  var numberFmt = new Intl.NumberFormat(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  var intFmt = new Intl.NumberFormat();
+
+  function list(name) { return Array.isArray(data[name]) ? data[name] : []; }
+  function present(v) { return v !== null && v !== undefined && v !== ""; }
+  function num(v) { var n = Number(v); return isFinite(n) ? n : 0; }
+  function clear(node) { while (node.firstChild) { node.removeChild(node.firstChild); } }
+  function el(tag, className, text) {
+    var node = document.createElement(tag);
+    if (className) { node.className = className; }
+    if (text !== undefined) { node.textContent = text; }
+    return node;
+  }
+
+  list("invoices").forEach(function (inv) {
+    if (present(inv.id) && present(inv.number)) { invoiceNumbers[String(inv.id)] = String(inv.number); }
+  });
+
+  function prepare(tab) {
+    if (prepared[tab]) { return prepared[tab]; }
+    var spec = TABS[tab];
+    prepared[tab] = list(tab).map(function (r) {
+      var item = r && typeof r === "object" ? r : {};
+      var ref = null;
+      if (tab === "time_entries" && present(item.invoice_id)) {
+        ref = invoiceNumbers[String(item.invoice_id)] || "#" + item.invoice_id;
+      }
+      var view = Object.assign({}, item, { invoice_ref: ref });
+      var hay = spec.cols.map(function (c) { return present(view[c.k]) ? String(view[c.k]) : ""; });
+      return { r: view, hay: hay.join("\n").toLowerCase(), inv: ref ? ref.toLowerCase() : "" };
+    });
+    return prepared[tab];
+  }
+
+  function fmtDate(iso) {
+    var d = new Date(iso);
+    return isNaN(d.getTime()) ? String(iso) : d.toLocaleString(undefined, { dateStyle: "long", timeStyle: "short" });
+  }
+
+  function applies(spec, filter) {
+    if (filter === "client") { return Boolean(spec.client); }
+    if (filter === "project") { return Boolean(spec.project); }
+    if (filter === "date") { return Boolean(spec.date); }
+    return Boolean(spec.invoice);
+  }
+
+  function matches(item, spec) {
+    var r = item.r;
+    if (state.query && item.hay.indexOf(state.query) < 0) { return false; }
+    if (state.client && applies(spec, "client") && String(r[spec.client]) !== state.client) { return false; }
+    if (state.project && applies(spec, "project") && String(r[spec.project]) !== state.project) { return false; }
+    if (applies(spec, "date")) {
+      var d = present(r[spec.date]) ? String(r[spec.date]) : "";
+      if ((state.from || state.to) && !d) { return false; }
+      if (state.from && d < state.from) { return false; }
+      if (state.to && d > state.to) { return false; }
+    }
+    if (state.invoice && applies(spec, "invoice")) {
+      var number = spec === TABS.invoices ? String(r.number || "").toLowerCase() : item.inv;
+      if (number.indexOf(state.invoice.toLowerCase()) < 0) { return false; }
+    }
+    return true;
+  }
+
+  function compare(key, dir, kind) {
+    return function (a, b) {
+      var x = a.r[key], y = b.r[key];
+      if (!present(x) && !present(y)) { return 0; }
+      if (!present(x)) { return 1; }
+      if (!present(y)) { return -1; }
+      if (kind === "num") { return (num(x) - num(y)) * dir; }
+      return String(x).localeCompare(String(y), undefined, { numeric: true, sensitivity: "base" }) * dir;
+    };
+  }
+
+  function kindOf(spec, key) {
+    var col = spec.cols.filter(function (c) { return c.k === key; })[0];
+    return col && (col.t === "hours" || col.t === "money") ? "num" : "text";
+  }
+
+  function options(select, entries, allLabel, keep) {
+    clear(select);
+    var all = el("option", "", allLabel);
+    all.value = "";
+    select.appendChild(all);
+    entries.forEach(function (e) {
+      var o = el("option", "", e[1]);
+      o.value = e[0];
+      select.appendChild(o);
+    });
+    select.value = entries.some(function (e) { return e[0] === keep; }) ? keep : "";
+    return select.value;
+  }
+
+  function collectNames(tab, idKey, nameKey, into) {
+    list(tab).forEach(function (r) {
+      if (r && present(r[idKey]) && !(String(r[idKey]) in into)) {
+        into[String(r[idKey])] = present(r[nameKey]) ? String(r[nameKey]) : "#" + r[idKey];
+      }
+    });
+  }
+
+  function sortedEntries(map) {
+    return Object.keys(map).map(function (k) { return [k, map[k]]; }).sort(function (a, b) {
+      return a[1].localeCompare(b[1], undefined, { numeric: true, sensitivity: "base" });
+    });
+  }
+
+  var clientNames = {};
+  collectNames("clients", "id", "name", clientNames);
+  ["time_entries", "invoices", "estimates", "expenses", "projects"].forEach(function (t) {
+    collectNames(t, "client_id", "client_name", clientNames);
+  });
+  var projectsByClient = {};
+  var projectNames = {};
+  collectNames("projects", "id", "name", projectNames);
+  ["time_entries", "expenses"].forEach(function (t) { collectNames(t, "project_id", "project_name", projectNames); });
+  list("projects").forEach(function (p) {
+    if (p && present(p.id)) { projectsByClient[String(p.id)] = present(p.client_id) ? String(p.client_id) : ""; }
+  });
+
+  function refreshFilterControls(spec) {
+    state.client = options($("filter-client"), sortedEntries(clientNames), "All clients", state.client);
+    var projects = {};
+    Object.keys(projectNames).forEach(function (id) {
+      if (!state.client || projectsByClient[id] === state.client || !(id in projectsByClient)) { projects[id] = projectNames[id]; }
+    });
+    state.project = options($("filter-project"), sortedEntries(projects), "All projects", state.project);
+    $("filter-client").disabled = !applies(spec, "client");
+    $("filter-project").disabled = !applies(spec, "project");
+    $("filter-from").disabled = !applies(spec, "date");
+    $("filter-to").disabled = !applies(spec, "date");
+    $("filter-invoice").disabled = !applies(spec, "invoice");
+  }
+
+  function link(cell, value, label) {
+    if (typeof value === "string" && SAFE_PATH.test(value) && value.indexOf("/.") < 0 && value.indexOf("..") < 0) {
+      var a = document.createElement("a");
+      a.setAttribute("href", value);
+      a.setAttribute("rel", "noopener");
+      a.textContent = label;
+      cell.appendChild(a);
+    } else if (present(value)) {
+      cell.textContent = String(value);
+    } else {
+      cell.appendChild(el("span", "dash", "—"));
+    }
+  }
+
+  function fill(cell, col, value) {
+    if (col.t === "file") { link(cell, value, col.label); return; }
+    if (!present(value) && value !== false) { cell.appendChild(el("span", "dash", "—")); return; }
+    if (col.t === "hours" || col.t === "money") { cell.textContent = numberFmt.format(num(value)); }
+    else if (col.t === "bool") { cell.textContent = value ? "Yes" : "No"; }
+    else if (col.t === "state") {
+      var tone = STATE_TONE[String(value).toLowerCase()];
+      cell.appendChild(el("span", "chip" + (tone ? " " + tone : ""), String(value)));
+    } else { cell.textContent = String(value); }
+  }
+
+  function renderHead(spec) {
+    var head = $("head");
+    clear(head);
+    var tr = document.createElement("tr");
+    spec.cols.forEach(function (col) {
+      var th = document.createElement("th");
+      th.setAttribute("scope", "col");
+      var numeric = col.t === "hours" || col.t === "money";
+      if (numeric) { th.className = "num"; }
+      var sorted = state.sort.key === col.k;
+      th.setAttribute("aria-sort", sorted ? (state.sort.dir > 0 ? "ascending" : "descending") : "none");
+      var button = el("button", "sort", col.h);
+      button.type = "button";
+      button.addEventListener("click", function () {
+        state.sort = { key: col.k, dir: state.sort.key === col.k ? -state.sort.dir : 1 };
+        state.page = 0;
+        render();
+      });
+      th.appendChild(button);
+      tr.appendChild(th);
+    });
+    head.appendChild(tr);
+  }
+
+  function renderSummary(spec, shown, total, matchesList) {
+    var box = $("summary");
+    clear(box);
+    function stat(value, text) {
+      var s = el("span", "stat");
+      s.appendChild(el("b", "", value));
+      s.appendChild(document.createTextNode(text));
+      box.appendChild(s);
+    }
+    var filtered = shown !== total;
+    stat(intFmt.format(shown), filtered ? " of " + intFmt.format(total) + " records" : " records");
+    if (spec.total) {
+      var sum = 0, extra = 0;
+      matchesList.forEach(function (i) {
+        sum += num(i.r[spec.total.k]);
+        if (spec.total.extra && i.r[spec.total.extra.when]) { extra += num(i.r[spec.total.extra.k]); }
+      });
+      stat(numberFmt.format(sum), " " + spec.total.h);
+      if (spec.total.extra) { stat(numberFmt.format(extra), " " + spec.total.extra.h); }
+    }
+  }
+
+  function render() {
+    var spec = TABS[state.tab];
+    refreshFilterControls(spec);
+    var all = prepare(state.tab);
+    var found = all.filter(function (item) { return matches(item, spec); });
+    found.sort(compare(state.sort.key, state.sort.dir, kindOf(spec, state.sort.key)));
+    var pages = Math.max(1, Math.ceil(found.length / PAGE_SIZE));
+    state.page = Math.min(state.page, pages - 1);
+    var start = state.page * PAGE_SIZE;
+    var slice = found.slice(start, start + PAGE_SIZE);
+
+    renderHead(spec);
+    var body = $("rows");
+    clear(body);
+    var fragment = document.createDocumentFragment();
+    slice.forEach(function (item) {
+      var tr = document.createElement("tr");
+      spec.cols.forEach(function (col) {
+        var td = document.createElement("td");
+        td.setAttribute("data-label", col.h);
+        var cls = col.t === "hours" || col.t === "money" ? "num" : (col.t || "");
+        if (cls) { td.className = cls; }
+        fill(td, col, item.r[col.k]);
+        tr.appendChild(td);
+      });
+      fragment.appendChild(tr);
+    });
+    body.appendChild(fragment);
+    $("no-results").hidden = slice.length > 0;
+    $("caption").textContent = spec.label + ": " + found.length + " matching records";
+    renderSummary(spec, found.length, all.length, found);
+
+    $("page-info").textContent = found.length
+      ? intFmt.format(start + 1) + "–" + intFmt.format(start + slice.length) + " of " + intFmt.format(found.length)
+        + (pages > 1 ? " · page " + (state.page + 1) + " of " + pages : "")
+      : "0 results";
+    $("prev").disabled = state.page === 0;
+    $("next").disabled = state.page >= pages - 1;
+
+    Array.prototype.forEach.call(document.querySelectorAll("#tabs .tab"), function (tab) {
+      var on = tab.getAttribute("data-tab") === state.tab;
+      tab.setAttribute("aria-selected", on ? "true" : "false");
+      tab.tabIndex = on ? 0 : -1;
+    });
+  }
+
+  function selectTab(name) {
+    if (!TABS[name]) { return; }
+    state.tab = name;
+    state.page = 0;
+    state.sort = { key: TABS[name].sort.key, dir: TABS[name].sort.dir };
+    render();
+  }
+
+  var tabButtons = Array.prototype.slice.call(document.querySelectorAll("#tabs .tab"));
+  tabButtons.forEach(function (button, index) {
+    var name = button.getAttribute("data-tab");
+    button.querySelector(".count").textContent = intFmt.format(list(name).length);
+    button.addEventListener("click", function () { selectTab(name); });
+    button.addEventListener("keydown", function (event) {
+      var next = { ArrowRight: index + 1, ArrowLeft: index - 1, Home: 0, End: tabButtons.length - 1 }[event.key];
+      if (next === undefined) { return; }
+      event.preventDefault();
+      var target = tabButtons[(next + tabButtons.length) % tabButtons.length];
+      selectTab(target.getAttribute("data-tab"));
+      target.focus();
+    });
+  });
+
+  var timer = null;
+  $("search").addEventListener("input", function (event) {
+    window.clearTimeout(timer);
+    var value = event.target.value.trim().toLowerCase();
+    timer = window.setTimeout(function () { state.query = value; state.page = 0; render(); }, 120);
+  });
+  [["filter-client", "client"], ["filter-project", "project"], ["filter-from", "from"],
+   ["filter-to", "to"], ["filter-invoice", "invoice"]].forEach(function (pair) {
+    var node = $(pair[0]);
+    node.addEventListener(node.tagName === "SELECT" ? "change" : "input", function () {
+      state[pair[1]] = node.value.trim();
+      state.page = 0;
+      render();
+    });
+  });
+  $("reset").addEventListener("click", function () {
+    window.clearTimeout(timer);
+    state.query = state.client = state.project = state.from = state.to = state.invoice = "";
+    ["search", "filter-from", "filter-to", "filter-invoice"].forEach(function (id) { $(id).value = ""; });
+    state.page = 0;
+    render();
+  });
+  $("prev").addEventListener("click", function () { state.page = Math.max(0, state.page - 1); render(); });
+  $("next").addEventListener("click", function () { state.page += 1; render(); });
+
+  var name = present(data.company_name) ? String(data.company_name) : "Harvest archive";
+  $("company").textContent = name;
+  document.title = name + " – Exit Archive";
+  $("generated").textContent = present(data.generated_at) ? "Archive generated " + fmtDate(data.generated_at) : "";
+  render();
+})();
+</script>
+</body>
+</html>

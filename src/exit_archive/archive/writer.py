@@ -30,6 +30,11 @@ README_TEXT = """Exit Archive
 
 This folder is a complete export of your Harvest account.
 
+Open index.html in your web browser to search and browse everything offline: time entries,
+invoices, estimates, expenses, clients and projects, with links to the PDFs and receipts.
+It needs no internet connection; keep it next to the data folder.
+
+  index.html                  the offline viewer (double-click to open)
   data/json/<resource>.json   full Harvest records, one JSON array per resource
   data/csv/<resource>.csv     the same records flattened for spreadsheets
                               (nested fields use dotted columns such as client.name;
