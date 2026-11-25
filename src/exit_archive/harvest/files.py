@@ -12,7 +12,13 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import quote, urlsplit
 
-from exit_archive.archive.writer import resolve_inside, safe_name
+from exit_archive.archive.paths import (
+    MAX_NUMBER_LEN,  # noqa: F401  (re-exported for callers of the old location)
+    RECEIPT_DIR,
+    pdf_file_name,
+    receipt_file_name,
+)
+from exit_archive.archive.writer import resolve_inside
 from exit_archive.errors import (
     AuthError,
     ExitArchiveError,
@@ -26,7 +32,6 @@ from exit_archive.harvest.http import DownloadError, HarvestClient, is_harvest_h
 MAX_FILE_BYTES = 50 * 1024 * 1024
 CONCURRENCY = 4
 PDF_MAGIC = b"%PDF"
-MAX_NUMBER_LEN = 60
 
 Missing = dict[str, Any]
 
@@ -71,8 +76,8 @@ def _receipt_jobs(expenses: Iterable[dict[str, Any]]) -> tuple[list[_Job], list[
         if not is_harvest_host_url(url):
             missing.append({"type": "receipt", "id": eid, "reason": "host_not_allowed"})
             continue
-        name = safe_name(str(receipt.get("file_name") or ""), eid)
-        jobs.append(_Job("receipt", eid, "receipts", name, url, send_token=True))
+        name = receipt_file_name(expense, receipt)
+        jobs.append(_Job("receipt", eid, RECEIPT_DIR, name, url, send_token=True))
     return jobs, missing
 
 
@@ -89,8 +94,7 @@ def _pdf_jobs(
         elif not isinstance(key, str) or not key:
             missing.append({"type": f"{kind}_pdf", "id": rid, "reason": "no_client_key"})
         else:
-            number = safe_name(str(record.get("number") or ""))[:MAX_NUMBER_LEN]
-            name = safe_name(f"{number}_{rid}.pdf")
+            name = pdf_file_name(record)
             url = f"{base}/client/{folder}/{quote(key, safe='')}.pdf"
             jobs.append(
                 _Job(f"{kind}_pdf", rid, folder, name, url, False, require_prefix=PDF_MAGIC)

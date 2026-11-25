@@ -1,7 +1,7 @@
 # HANDOVER
 
 ## Status in one paragraph
-Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). Hosting (D1) and payments (D2) still need the user's decision, but nothing before T4.5 depends on them.
+Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: T2.1 (viewer data bundle) done, 440 tests, 99.43 %. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
 
 ## What exists
 - `CLAUDE.md`, `docs/BRIEF.md`, `.claude/agents/*.md`, `.claude/commands/pipeline.md` — project rules, brief, agent roles, `/pipeline` loop
@@ -27,6 +27,8 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
   - stages: accounts → company → records → files → archive
   - keeps only slim projections in memory
   - on any failure, the work dir is removed and no zip is left
+- `src/exit_archive/archive/paths.py` — `receipt_file_name()`, `pdf_file_name()`, `RECEIPT_DIR`, `MAX_NUMBER_LEN`: one place for downloaded-file names (used by `harvest/files.py` and the viewer)
+- `src/exit_archive/viewer/bundle.py` — `build_viewer_data(work_dir, company_name=None)` → `data/viewer-data.js` (`window.EXIT_ARCHIVE_DATA = {...};`, flat slim schema in the module docstring, `<>&` U+2028/9 escaped, paths only for files that exist); reads JSON via `archive.writer.iter_json_records()` one record at a time. Not yet wired into the exporter (T2.2.3)
 - `src/exit_archive/cli.py` — `exit-archive export --out DIR [--account-id ID]`:
   - exit codes: 0 ok, 2 usage, 3 auth, 4 other error, 130 interrupted
   - installs log redaction and pins httpx/httpcore to WARNING
@@ -62,8 +64,8 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - Full list with reasons: PLAN.md §6 and the decision log.
 
 ## Open decisions for the user
-- **D1 Hosting**: I recommend Render, one Starter service plus a 10 GB disk (~$10/mo). Alternative: Fly.io (~$7/mo; needs flyctl and auto-stop off). Blocks T4.5.
-- **D2 Payments**: I recommend a Stripe Payment Link at $49 with success URL `https://<host>/start?session_id={CHECKOUT_SESSION_ID}` and a restricted key that can read Checkout Sessions. You need a Stripe account. Alternative: Lemon Squeezy or Paddle as merchant of record, for sales tax/VAT.
+- **D1 Hosting — decided 2026-11-25: Render.** Blueprint `render.yaml` (T4.5), Starter service + 10 GB disk (~$10/mo). The user is installing the Render GitHub App; creating the service needs a separate yes.
+- **D2 Payments — decided 2026-11-25: Stripe Payment Link at $49.** Still to ask the user, step by step: Stripe account, product + Payment Link (success URL needs the Render host), a restricted test-mode key, and later live keys.
 - **D3 Domain**: optional (~$12/yr).
 - **D4 Tokens that see several accounts**: I recommend an optional Account ID field that fails with the account list when ambiguous. The CLI already behaves this way.
 - **D5 Privacy page wording**: approve it before launch.
@@ -71,13 +73,13 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - **Trial token**: I recommend keeping it until T4.6 (the launch check runs a real export), then revoking it in Harvest → Developers. If you'd rather revoke it now, create a fresh one for T4.6.
 
 ## Next 3 tasks
-1. **T2.1 Viewer data bundle (executor):** writes `data/viewer-data.js` with slim fields. The dispatch must tell the executor that the tester tests it may change are none.
-2. **T2.2 Offline `index.html` viewer (executor):** vanilla JS and `textContent` only. Its CSP must still work from `file://`; prove it with a Playwright e2e under the `e2e` marker. It also wires `build_viewer()` into `export_account()` before `write_manifest`.
-3. **T3.1 Job store, runner and expiry cleanup (executor):**
+1. **T2.2 Offline `index.html` viewer (executor):** vanilla JS and `textContent` only. Its CSP must still work from `file://`; prove it with a Playwright e2e under the `e2e` marker. It also wires `build_viewer()` into `export_account()` before `write_manifest`.
+2. **T3.1 Job store, runner and expiry cleanup (executor):**
    - SQLite with no token column
    - Semaphore of 2 concurrent jobs
    - T3.1.5: one process-wide redactor holding the set of active tokens
    - the cleanup sweep also removes orphan work dirs
+3. **T3.2 Web routes and pages (executor)**, then T3.3 Stripe gate (respx only, no Stripe account needed).
 
 ## Gotchas
 - **Agent rules**
@@ -109,4 +111,4 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`: config, not secret. T3.2 adds the names to `.env.example`.
 
 ## Last updated
-2026-11-24. Last commit: 3c6d2a6 (feat: add export_account pipeline and exit-archive export CLI). T1.7 and this handover are about to be committed together.
+2026-11-25. Last commit before this update: c6fc2a8. T2.1 + these doc edits are about to be committed together; T2.2 dispatched next.

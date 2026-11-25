@@ -217,6 +217,21 @@ class ArchiveWriter:
                 writer.writerow([_cell(flat.get(col)) for col in header])
 
 
+def iter_json_records(path: Path) -> Iterator[dict[str, Any]]:
+    """Yield the records of a ``data/json/<resource>.json`` file one at a time.
+
+    Relies on the layout ``_ResourceStream`` writes: ``[`` on the first line, one record per
+    line (all but the last followed by a comma), ``]`` on the last. The file is never parsed
+    as a whole, so memory stays per record.
+    """
+    with path.open(encoding="utf-8") as fh:
+        for line in fh:
+            text = line.strip()
+            if text in ("[", "]", "[]", ""):
+                continue
+            yield json.loads(text.removesuffix(","))
+
+
 def _read_jsonl(path: Path) -> Iterator[dict[str, Any]]:
     with path.open(encoding="utf-8") as fh:
         for line in fh:

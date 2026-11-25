@@ -109,20 +109,34 @@ Standing acceptance for every executor task (the tester checks these even when n
     - (from T1.6 gate) a test sends `KeyboardInterrupt` mid-export: exit code 130, stderr `interrupted`, no traceback, `--out` empty
 
 ## Phase 2: Offline viewer — `index.html` searches and filters everything from `file://` with no network
-- [ ] T2.1 Viewer data bundle — owner: executor — est: 1h
-  - [ ] T2.1.1 `viewer/bundle.py`: write `data/viewer-data.js` = `window.EXIT_ARCHIVE_DATA = {...};` with slim fields: time entries (date, client, project, task, user, hours, notes, billable, invoice id), invoices (number, client, issue/due date, amount, state, pdf path), estimates, expenses (date, client, project, category, amount, notes, receipt path), clients, projects
+- [x] T2.1 Viewer data bundle — owner: executor — est: 1h — done 2026-11-25 (tester PASS first time, 440 tests, 99.43 %)
+  - [x] T2.1.1 `viewer/bundle.py`: `build_viewer_data(work_dir: Path, company_name: str | None = None) -> Path` writes `data/viewer-data.js` = `window.EXIT_ARCHIVE_DATA = {...};` with slim fields: time entries (date, client, project, task, user, hours, notes, billable, invoice id), invoices (number, client, issue/due date, amount, state, pdf path), estimates (number, client, issue date, amount, state, pdf path), expenses (date, client, project, category, amount, notes, receipt path), clients, projects. Keep ids (record, client, project) so T2.2 can filter. Input is the already-written `data/json/<resource>.json`; a missing file (feature off) → empty list
+  - [x] T2.1.2 Memory stays per record (PLAN K9): read each `data/json/<resource>.json` one record at a time through a reader that lives next to the writer (e.g. `iter_json_records(path)` in `archive/writer.py`, tested against `ArchiveWriter` output), and write the output incrementally. No `json.load` of a whole resource file
+  - [x] T2.1.3 Paths: extract the receipt / invoice-PDF / estimate-PDF relative-path rules from `harvest/files.py` into shared helpers used by both `files.py` and the bundle (no behaviour change; existing `tests/harvest/test_files*.py` and `test_download_adversarial.py` pass unedited). A path is emitted (posix, relative to the archive root) only if that file exists in `work_dir`, else `null`
+  - [x] T2.1.4 Encoding: `json.dumps(..., ensure_ascii=False, allow_nan=False)` then replace `<`, `>`, `&`, U+2028, U+2029 with the JSON escapes `\u003c`, `\u003e`, `\u0026`, `\u2028`, `\u2029`; UTF-8 file. Do not wire into `export_account()` yet (that is T2.2.3)
   - Acceptance:
-    - Test: the file starts with `window.EXIT_ARCHIVE_DATA = ` and the remainder (minus `;`) parses as JSON
-    - Test: a note containing `</script><img src=x onerror=alert(1)>` is preserved as data (escaped in JSON), and relative paths point to files that exist in the work dir
-- [ ] T2.2 Offline `index.html` viewer — owner: executor — est: 2h
-  - [ ] T2.2.1 `viewer/index.html` template (inline CSS + vanilla JS, packaged with `importlib.resources`), tabs per record type, global text search, filters: client, project, date range, invoice number; paginated table (200 rows/page); links to PDFs and receipts by relative path; totals of hours/amounts for the current filter
-  - [ ] T2.2.2 CSP `<meta>` with `default-src 'none'` and `connect-src 'none'`; pick `script-src`/`style-src`/`img-src` values that still let `data/viewer-data.js` and receipt images load from `file://` in Chromium (the e2e test proves it; `'self'` may not match `file://`); record data rendered with `textContent` only
-  - [ ] T2.2.3 Wire `build_viewer()` into `export_account()`
-  - [ ] T2.2.4 Optional `e2e` pytest marker (skipped by default) with Playwright: open the fixture archive via `file://`, search, filter by client, assert row counts
+    - Test: the file starts with `window.EXIT_ARCHIVE_DATA = ` and the remainder (minus the trailing `;` and newline) parses as JSON with keys `time_entries, invoices, estimates, expenses, clients, projects`
+    - Test: a note containing `</script><img src=x onerror=alert(1)>` is preserved as data (round-trips equal after parsing) and the raw file contains no `<` or `>` characters at all
+    - Test: relative paths point to files that exist in the work dir; a receipt/PDF recorded missing gets `null`; a path never starts with `/` and never contains `..` or `\`
+    - Test: a work dir with no `invoices.json`/`estimates.json`/`expenses.json` (features off) yields empty lists, no error
+    - Test: slim records hold only the listed fields (e.g. no `client_key`, no `receipt.url`, no user email) — assert exact key sets
+    - Test: records with missing or null nested objects (`client: null`, no `task`) produce `null` fields, not an exception
+    - Test: the reader yields the same records `ArchiveWriter` wrote, for 0, 1 and many records, including notes with newlines and unicode
+    - Test: a fixture of ≥ 5 000 time entries is processed without `json.load`/`json.loads` of the whole file (e.g. assert the reader is used, or monkeypatch `json.load` to raise)
+    - All existing tests pass with no edits to any existing test file
+- [~] T2.2 Offline `index.html` viewer — owner: executor — est: 2h — dispatched 2026-11-25
+  - [ ] T2.2.1 `viewer/index.html` template (inline CSS + vanilla JS, packaged with `importlib.resources` as package data), tabs per record type (time entries, invoices, estimates, expenses, clients, projects), global text search, filters: client, project, date range, invoice number; paginated table (200 rows/page); links to PDFs and receipts by relative path; totals of hours/amounts for the current filter; company name and generated_at in the header. Reads the flat schema documented in `viewer/bundle.py`
+  - [ ] T2.2.2 CSP `<meta>` with `default-src 'none'`, `connect-src 'none'`, `object-src 'none'`, `base-uri 'none'`, `form-action 'none'`; inline script allowed by its `'sha256-…'` hash (no `'unsafe-inline'` in `script-src`); pick the source that lets `data/viewer-data.js` load from `file://` in Chromium (the e2e proves it; `'self'` may not match `file://`). Record data rendered with `textContent` only. A link `href` is set only for paths matching `^(receipts|invoices|estimates)/[A-Za-z0-9._-]+$`, with `rel="noopener"`
+  - [ ] T2.2.3 `build_viewer(work_dir, company_name)` in `viewer/__init__.py` (or `viewer/build.py`): calls `build_viewer_data()` and writes `index.html` at the archive root; wired into `_export_into()` after `writer.close()` and before `write_manifest()`. README.txt text mentions `index.html` if no existing test pins the README text
+  - [ ] T2.2.4 `e2e` pytest marker registered and excluded by default (`addopts` → `-m 'not live and not e2e'`); `-m e2e` alone also disables the coverage gate (extend `pytest_configure` in `tests/conftest.py`, keep the `live` behaviour). Playwright goes in a separate `e2e` dependency group, never in `dev`/runtime deps. The e2e test skips (not fails) when `playwright` is not importable or Chromium is not installed, and makes no network request (block all non-`file:` requests in the browser context and assert none were attempted)
   - Acceptance:
-    - Static test: `index.html` contains no `http://` or `https://` in any `src`/`href`, no `fetch(`, no `XMLHttpRequest`, no `innerHTML` assignment
-    - The fixture export zip contains `index.html` and `data/viewer-data.js`, both listed in `MANIFEST.json`
-    - `uv run pytest -m e2e -q` (after `uv run playwright install chromium`) passes: the page loads from `file://`, a search for a fixture note shows exactly 1 row, the XSS fixture note renders as text (no dialog fires)
+    - Static test: `index.html` contains no `http://` or `https://` in any `src`/`href`, no `fetch(`, no `XMLHttpRequest`, no `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write`/`eval(`/`new Function`
+    - Static test: the CSP meta is the first element in `<head>`, contains `default-src 'none'` and `connect-src 'none'`, has no `'unsafe-inline'` or `'unsafe-eval'` in `script-src`, and its `sha256` hash equals the hash of the inline script in the template
+    - The fixture export zip (respx, as in `tests/test_exporter.py`) contains `index.html` and `data/viewer-data.js`, both listed in `MANIFEST.json` with correct sha256; the token string is absent from both
+    - A failed export still leaves no zip and no work dir (existing tests stay green)
+    - `uv run --offline pytest -q` (default) collects no e2e test, passes, coverage ≥ 80 %; `uv run --offline pytest -m e2e -q` without Playwright exits 0 with the e2e tests skipped
+    - With Playwright + Chromium installed: `uv run --offline --group e2e pytest -m e2e -q` passes: the page loads from `file://`, a search for a fixture note shows exactly 1 row, a client filter gives the expected row count, the XSS fixture note renders as text (no dialog fires, no console CSP violation for the data script), a hostile path (`javascript:alert(1)`, `../x`, `/etc/passwd`) gets no link
+    - The executor reports whether Playwright/Chromium could be installed; if not, the e2e is unverified and the orchestrator decides (no silent pass)
 
 ## Phase 3: Web app — pay, paste token, watch progress, download within 7 days
 - [ ] T3.1 Job store, runner and expiry cleanup — owner: executor — est: 2.5h
@@ -186,8 +200,8 @@ Standing acceptance for every executor task (the tester checks these even when n
   - Acceptance:
     - `docs/DEPLOY.md` exists and lists every env var name read by `src/` (checked with `grep -rhoE "os\.environ(\.get)?\[?\(?\"[A-Z_]+" src/` against the table)
     - Contains no secret values
-- [!] T4.5 Hosting config and first deploy — owner: deployer — est: 1h — blocked on D1 (hosting) and the user's yes to create paid resources
-  - [ ] T4.5.1 `render.yaml` (or `fly.toml`): one web service from the Dockerfile, persistent disk at `/data` (10 GB), health check `/healthz`, env vars by name with `sync: false` for secrets, single instance
+- [!] T4.5 Hosting config and first deploy — owner: deployer — est: 1h — D1 decided (Render, Blueprint `render.yaml`); still blocked on the user's yes to create the paid service + disk
+  - [ ] T4.5.1 `render.yaml` Blueprint: one web service from the Dockerfile, persistent disk at `/data` (10 GB), health check `/healthz`, env vars by name with `sync: false` for secrets, single instance
   - [ ] T4.5.2 Add the platform section to `docs/DEPLOY.md`; prepare the exact create/deploy commands and wait for the user's approval before running them
   - Acceptance:
     - Config file validates with the platform's validator or schema (or is reviewed line by line in the report if no validator is available offline)
@@ -216,7 +230,7 @@ Standing acceptance for every executor task (the tester checks these even when n
 - More repriced vendors (FreshBooks, HoneyBook) — the brief's growth path
 
 ## Blocked / needs the user
-- D1 Hosting platform (recommended: Render Starter + 10 GB disk ≈ $10/mo) — blocks T4.5, T4.6
-- D2 Payments (recommended: Stripe Payment Link at $49; you need a Stripe account, a product, a Payment Link with success URL `https://<host>/start?session_id={CHECKOUT_SESSION_ID}`, and a restricted key with Checkout Sessions read) — blocks live keys in T4.6
+- D1 DECIDED 2026-11-25: Render. User is installing the Render GitHub App on the repo; no service yet. Still needs the user's yes, step by step, before creating the Blueprint service + 10 GB disk (≈ $10/mo) — blocks T4.5, T4.6
+- D2 DECIDED 2026-11-25: Stripe Payment Link at $49. Still needs from the user (ask at each step): Stripe account, product + Payment Link with success URL `https://<host>/start?session_id={CHECKOUT_SESSION_ID}` (host known after T4.5), a restricted key with Checkout Sessions read (test mode first, live only after the user's yes) — blocks T4.6
 - Live-token follow-ups: verify the estimate PDF URL (needs an estimate in the trial account + the user's OK for another live run); revoke/rotate the trial token when live testing ends (recommended after T4.6)
 - D3 Domain (optional) · D4 multi-account behaviour (recommendation in PLAN.md) · D5 approve privacy page wording before launch
