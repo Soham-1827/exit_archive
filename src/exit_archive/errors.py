@@ -51,3 +51,10 @@ class HarvestUnavailableError(_HarvestHttpError):
 
 class ExportError(ExitArchiveError):
     """Export-level failure with a fixed, caller-written safe message."""
+
+
+class SessionInUseError(ExitArchiveError):
+    """A paid checkout session already has a queued, running, finished or expired job."""
+
+    def __init__(self) -> None:
+        super().__init__("This payment session has already been used for an export")

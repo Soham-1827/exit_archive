@@ -1,14 +1,17 @@
 # HANDOVER
 
 ## Status in one paragraph
-Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. Planned hours used: 15.5 of 28. T3.1 in progress. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
+Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. Planned hours used: 18 of 28. T3.2 in progress. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
 
 ## What exists
 - `CLAUDE.md`, `docs/BRIEF.md`, `.claude/agents/*.md`, `.claude/commands/pipeline.md` — project rules, brief, agent roles, `/pipeline` loop
 - `PLAN.md` (architecture, token security model, archive layout, decision log), `TODO.md` (tasks + acceptance), `HANDOVER.md` (this file)
 - `pyproject.toml`, `uv.lock`, `.python-version` (3.12), `.env.example` (names only) — ruff, mypy strict, pytest with `-m 'not live'` and an 80 % coverage gate
-- `src/exit_archive/secrets.py` — `HarvestToken` (slotted, immutable, masked repr/str/format, unpicklable, `reveal()`), `redact()`, `install_log_redaction()` (record-factory hook; malformed log calls fall back instead of raising)
-- `src/exit_archive/errors.py` — `ExitArchiveError`, `AuthError` 401, `ForbiddenError` 403, `NotFoundError` 404, `RateLimitedError` 429, `HarvestUnavailableError` 5xx, `ExportError`; messages from safe fields only
+- `src/exit_archive/secrets.py` — `HarvestToken` (slotted, immutable, masked repr/str/format, unpicklable, `reveal()`), `redact()`, `install_log_redaction(token|None) -> uninstall` over one process-wide, lock-guarded, refcounted registry (uninstall in any order; the last one restores the original factory only if ours is still current; malformed log calls never raise)
+- `src/exit_archive/jobs/store.py` — `JobStore` (stdlib sqlite3 `$DATA_DIR/jobs.sqlite3`; no token or account column; statuses queued/running/done/failed/expired; partial unique index on `checkout_session_id` over non-failed rows → `SessionInUseError`)
+- `src/exit_archive/jobs/runner.py` — `JobRunner(store, data_dir, max_concurrent=2, export=…)`: `submit(token, account_id, session_id) -> job_id`, `recover_on_startup()`, `wait_idle()`, `aclose()` (open jobs → failed/cancelled); exports into `$DATA_DIR/archives/<job_id>/`; stores only redacted `ExitArchiveError` text or a type name; nothing but `CancelledError` escapes a task; `ARCHIVE_TTL` 7 days
+- `src/exit_archive/jobs/cleanup.py` — `sweep(store, data_dir, now)` (expire archives, orphan work dirs / `.zip.part` > 1 h, row-less dirs; never follows symlinks; re-reads status per entry), `run_cleanup_loop()`
+- `src/exit_archive/errors.py` — `ExitArchiveError`, `SessionInUseError`, `AuthError` 401, `ForbiddenError` 403, `NotFoundError` 404, `RateLimitedError` 429, `HarvestUnavailableError` 5xx, `ExportError`; messages from safe fields only
 - `src/exit_archive/harvest/http.py` — `HarvestClient`:
   - rate limiting: `RateLimiter`, 100 requests per 15 s
   - retries on 429 (`Retry-After`), 500/502/503/504 and transport errors; 3xx → error
@@ -38,7 +41,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 
 ## How to run, test, deploy
 - Install: `uv sync` (only when dependencies change; Python 3.12 via `uv python install 3.12` if missing)
-- Test: `uv run --offline pytest -q -W error::pytest.PytestDeprecationWarning` (513 tests, coverage gate 80 %; `e2e` and `live` deselected by default)
+- Test: `uv run --offline pytest -q -W error::pytest.PytestDeprecationWarning` (607 tests, coverage gate 80 %; `e2e` and `live` deselected by default)
 - Lint/types: `uv run --offline ruff check . && uv run --offline ruff format --check . && uv run --offline mypy src`
 - Token grep: `grep -rln "\.reveal()" src/` must list only `secrets.py` and `harvest/http.py`
 - Viewer e2e (optional): `uv sync --group e2e` once (network), `uv run --offline --group e2e playwright install chromium`, then `uv run --offline --group e2e pytest -m e2e -q`. Skips cleanly without Playwright/Chromium
@@ -75,9 +78,9 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - **Trial token**: I recommend keeping it until T4.6 (the launch check runs a real export), then revoking it in Harvest → Developers. If you'd rather revoke it now, create a fresh one for T4.6.
 
 ## Next 3 tasks
-1. **T3.1 Job store, runner and expiry cleanup (executor, dispatched 2026-11-25):** stdlib only; no token column; partial unique index on session id; semaphore of 2; process-wide redactor (T3.1.5); sweep incl. orphan work dirs under `$DATA_DIR/archives/`.
-2. **T3.2 Web routes and pages (executor):** starts with T3.2.0, adding fastapi/uvicorn/jinja2/python-multipart (network once). Custom 422 handler; lifespan installs redaction + httpx WARNING pin once.
-3. **T3.3 Stripe gate (executor):** respx only; no Stripe account needed yet. Then Phase 4 (T4.1–T4.4 need no user input; T4.5/T4.6 need the user's yes at each step).
+1. **T3.2 Web routes and pages (executor, dispatched 2026-11-25):** T3.2.0 adds fastapi/uvicorn/jinja2/python-multipart (network once); `create_app()` factory; payment seam that fails closed; custom 422/HTTP/500 handlers; lifespan wires redaction, store, recovery and the cleanup loop.
+2. **T3.3 Stripe gate (executor):** respx only; no Stripe account needed yet. Implements the `PaymentVerifier` from T3.2.1a.
+3. **T4.1 Dockerfile, T4.2 CI, T4.3 hardening, T4.4 DEPLOY.md (deployer):** no user input needed. Then T4.5 (Render Blueprint) and T4.6 (launch check): ask the user before each account, key or paid step.
 
 ## Gotchas
 - **Agent rules**
@@ -110,4 +113,4 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`: config, not secret. T3.2 adds the names to `.env.example`.
 
 ## Last updated
-2026-11-25. Last commit: dab901f (T2.1). T2.2 + these doc edits are about to be committed together; T3.1 dispatched next.
+2026-11-25. Last commit: 2720b09 (T2.2). T3.1 + these doc edits are about to be committed together; T3.2 dispatched next.

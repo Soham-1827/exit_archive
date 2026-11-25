@@ -1,7 +1,9 @@
 """Customer token wrapper and log redaction. The token lives in memory only."""
 
+import itertools
 import logging
 import re
+import threading
 from collections.abc import Callable
 from typing import NoReturn
 
@@ -58,45 +60,112 @@ def redact(text: str, token: HarvestToken | None) -> str:
     return _BEARER.sub(_MASK, text)
 
 
-class RedactionFilter(logging.Filter):
-    """Scrub the token from a log record's message and traceback text."""
+def _redact_all(text: str, tokens: tuple[HarvestToken, ...]) -> str:
+    for token in tokens:  # longest first, so a token containing another is fully masked
+        text = text.replace(token.reveal(), _MASK)
+    return _BEARER.sub(_MASK, text)
 
-    def __init__(self, token: HarvestToken | None) -> None:
-        super().__init__()
-        self._token = token
 
-    def filter(self, record: logging.LogRecord) -> bool:
+def _scrub_record(record: logging.LogRecord, tokens: tuple[HarvestToken, ...]) -> None:
+    """Scrub the token values and bearer credentials from a record in place."""
+    try:
+        message = record.getMessage()
+    except (TypeError, ValueError, KeyError):
+        message = f"{record.msg!s} args={record.args!r}"
+    record.msg = _redact_all(message, tokens)
+    record.args = ()
+    if record.exc_info and not record.exc_text:
+        record.exc_text = logging.Formatter().formatException(record.exc_info)
+    if record.exc_text:
+        record.exc_text = _redact_all(record.exc_text, tokens)
+    if record.stack_info:
+        record.stack_info = _redact_all(record.stack_info, tokens)
+
+
+class _Registry:
+    """Process-wide, lock-guarded set of active redactions behind one record-factory hook.
+
+    Each ``register`` call gets its own id, so the same token may be registered many times and
+    uninstalls may run in any order. The hook is installed with the first registration and the
+    exact original factory is restored when the last one is removed, provided nobody has
+    wrapped our hook in the meantime. If someone did, their factory is left alone and our hook
+    stays in their chain as a pass-through (it scrubs nothing while no token is registered).
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._ids = itertools.count(1)
+        self._active: dict[int, HarvestToken | None] = {}
+        self._tokens: tuple[HarvestToken, ...] = ()  # read lock-free by the hook
+        self._original: Callable[..., logging.LogRecord] | None = None
+        self._left_original: Callable[..., logging.LogRecord] | None = None
+        self._local = threading.local()
+        self._hook_fn: Callable[..., logging.LogRecord] = self._hook
+
+    def _hook(self, *args: object, **kwargs: object) -> logging.LogRecord:
+        if getattr(self._local, "busy", False):
+            # Our hook is in the chain twice (a wrapper around it was re-wrapped by us):
+            # the inner call builds the record from the factory below our first install.
+            inner: Callable[..., logging.LogRecord] = self._left_original or logging.LogRecord
+            return inner(*args, **kwargs)
+        self._local.busy = True
         try:
-            message = record.getMessage()
-        except (TypeError, ValueError, KeyError):
-            message = f"{record.msg!s} args={record.args!r}"
-        record.msg = redact(message, self._token)
-        record.args = ()
-        if record.exc_info and not record.exc_text:
-            record.exc_text = logging.Formatter().formatException(record.exc_info)
-        if record.exc_text:
-            record.exc_text = redact(record.exc_text, self._token)
-        if record.stack_info:
-            record.stack_info = redact(record.stack_info, self._token)
-        return True
+            base: Callable[..., logging.LogRecord] = (
+                self._original or self._left_original or logging.LogRecord
+            )
+            record = base(*args, **kwargs)
+        finally:
+            self._local.busy = False
+        tokens = self._tokens
+        if tokens or self._active:  # with nothing registered the hook is a pass-through
+            _scrub_record(record, tokens)
+        return record
+
+    def _rebuild(self) -> None:
+        unique = {t.reveal(): t for t in self._active.values() if t is not None}
+        self._tokens = tuple(sorted(unique.values(), key=lambda t: -len(t.reveal())))
+
+    def register(self, token: HarvestToken | None) -> Callable[[], None]:
+        with self._lock:
+            if not self._active:
+                if logging.getLogRecordFactory() is not self._hook_fn:
+                    self._original = logging.getLogRecordFactory()
+                    logging.setLogRecordFactory(self._hook_fn)
+                else:  # our pass-through hook is still current: reuse the factory below it
+                    self._original, self._left_original = self._left_original, None
+            reg_id = next(self._ids)
+            self._active[reg_id] = token
+            self._rebuild()
+
+        def uninstall() -> None:
+            self._release(reg_id)
+
+        return uninstall
+
+    def _release(self, reg_id: int) -> None:
+        with self._lock:
+            if self._active.pop(reg_id, _MISSING) is _MISSING:
+                return  # already uninstalled
+            self._rebuild()
+            if self._active:
+                return
+            original, self._original = self._original, None
+            if logging.getLogRecordFactory() is self._hook_fn:
+                self._left_original = None
+                if original is not None:
+                    logging.setLogRecordFactory(original)
+            else:
+                self._left_original = original  # someone wrapped us: stay as a pass-through
+
+
+_MISSING: object = object()
+_REGISTRY = _Registry()
 
 
 def install_log_redaction(token: HarvestToken | None) -> Callable[[], None]:
-    """Scrub every record from every logger; returns a function that undoes it.
+    """Scrub every record from every logger; returns an idempotent function that undoes it.
 
-    Wraps the log record factory, so it applies regardless of logger or handler.
+    All registrations share one process-wide record-factory hook, so overlapping jobs are safe
+    whatever order they finish in. ``None`` scrubs ``Bearer`` credentials only.
     """
-    previous = logging.getLogRecordFactory()
-    scrubber = RedactionFilter(token)
-
-    def factory(*args: object, **kwargs: object) -> logging.LogRecord:
-        record = previous(*args, **kwargs)
-        scrubber.filter(record)
-        return record
-
-    logging.setLogRecordFactory(factory)
-
-    def uninstall() -> None:
-        logging.setLogRecordFactory(previous)
-
-    return uninstall
+    return _REGISTRY.register(token)
