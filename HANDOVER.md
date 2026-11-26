@@ -1,44 +1,7 @@
 # HANDOVER
 
-## RESUME HERE (written 2026-11-25 at the session handoff; delete this section once T4.3 is committed)
-- **HEAD on main = `1e1d9cc`**, pushed, CI green. Everything up to and including T4.1/T4.2 is committed.
-- **T4.3 hardening is BUILT but UNCOMMITTED in the working tree.** It still needs the tester gate.
-  - Executor's final full run: 953 passed / 0 failed / 2 xfailed, 98.55 %. ruff, format and mypy clean; the reveal grep lists exactly the 3 allowed files.
-  - The working tree holds:
-    - new `src/exit_archive/web/{security,accesslog}.py`
-    - edits to `web/app.py`, `web/settings.py`, `secrets.py` and `.env.example`
-    - new tests: `tests/test_secret_getstate.py`, `tests/web/test_{security_headers,body_limit,rate_limit,origin_check,access_log_middleware}.py`
-    - the orchestrator's uncommitted T4.3 rulings in `TODO.md` and `PLAN.md`
-- **The four existing-test edits are allowed and already verified.** They were ruled in PLAN.md's decision log ("T4.3 executor stop"):
-  1. `tests/web/test_stripe_adversarial.py`: only the xfail decorator on `test_get_state_does_not_leak_secret` was deleted.
-  2. `tests/web/test_web_adversarial.py`: only two `status_code == 400` asserts became `== 413` in `test_oversized_token_and_body_no_echo`.
-  3. `tests/web/test_env_example.py`: only `"TRUSTED_PROXY_HOPS"` was added to `EXPECTED`.
-  4. `tests/web/test_access_log.py::test_real_access_logger_reports_no_logging_error`: the log call moved outside the lifespan, and a SILENCED-MARKER line is logged inside it and asserted absent from stderr.
-  - Every other existing test file must stay identical to `1e1d9cc`.
-- **D1 was rejected and reworked:** `Secret.__getstate__` is now a plain method returning `None`. D2–D5 were accepted: the exit_archive.access logger is made visible; logged paths are sanitised (%XX, 120-char cap, job ids masked); new 403/413/429 pages, with a non-numeric Content-Length giving 400; LRU eviction at 10k keys. Middleware order, outermost first: SecurityHeaders, AccessLog, ServerError, BodyLimit, OriginCheck, RateLimit, router.
-- **The T4.3 tester gate was interrupted when the session ended.** It left a partial, untracked, tester-owned file, `tests/web/test_hardening_adversarial.py` (~600 lines, never run to completion).
-  - The new session's tester owns this file: it may finish it, fix it or rewrite it, then run the full gate and the uvicorn smoke run.
-  - Its checklist is the 9 points in the T4.3 section of TODO.md, plus:
-    - all Secret state paths
-    - no duplicate log handlers after repeated lifespans
-    - CRLF/%0d%0a log-forging
-    - spoofing the left-most XFF entry
-    - Origin `null`, case differences and default ports
-    - headers on a forced 500
-    - a real uvicorn run with `--proxy-headers`, with no query string or token in stderr
-- **After a tester PASS:**
-  1. Commit everything with `feat: harden web app with security headers, body and rate limits, origin check and path-only access log`.
-  2. Push, then check that CI is green with `curl -s "https://api.github.com/repos/Soham-1827/exit_archive/actions/runs?per_page=1"`.
-  3. The orchestrator then updates the docs and removes this section.
-- **Then T4.4** `docs/DEPLOY.md` **plus T4.5.1** `render.yaml`, both in the repo only.
-- **Then STOP and ask the user** before T4.5.2, which creates the Render service and a 10 GB disk for about $10/mo.
-- **The user also owes, and should be asked when relevant:**
-  - D6, a support email for the 402 and privacy pages
-  - D5, approval of the privacy wording
-  - the Stripe test-mode steps in TODO.md under D2
-
 ## Status in one paragraph
-Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. T3.2 (FastAPI web app: landing, token form, progress, download, privacy draft; payment seam fails closed) passed after one fix loop, which also fixed log redaction so it keeps `record.args` intact (uvicorn access logs work); 750 tests. Phase 3 done 2026-11-25: T3.3 (Stripe Checkout Session verification, respx mocks only, Stripe key as a redacted `Secret`) passed first time; 889 tests. T4.1+T4.2 done: Dockerfile (pinned digests, non-root uid 10001, `$PORT`) and GitHub Actions CI (lint, types, tests, reveal grep, docker build + `/healthz` smoke), green on main. Planned hours used: 24 of 28. T4.3 (hardening) in progress with the executor. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
+Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. T3.2 (FastAPI web app: landing, token form, progress, download, privacy draft; payment seam fails closed) passed after one fix loop, which also fixed log redaction so it keeps `record.args` intact (uvicorn access logs work); 750 tests. Phase 3 done 2026-11-25: T3.3 (Stripe Checkout Session verification, respx mocks only, Stripe key as a redacted `Secret`) passed first time; 889 tests. T4.1+T4.2 done: Dockerfile (pinned digests, non-root uid 10001, `$PORT`) and GitHub Actions CI (lint, types, tests, reveal grep, docker build + `/healthz` smoke), green on main. T4.3 hardening passed two independent tester runs and is committed as f3dc0bc: security headers, a 16 KB body limit, a POST /jobs rate limit keyed via `TRUSTED_PROXY_HOPS`, an Origin check, our own path-only access log, `Bearer%20` scrubbing and `Secret.__getstate__` returning None. Suite: 1050 passed / 3 xfailed, 98.89 %. Planned hours used: 25.5 of 28.25. Next: T4.3a (A1 log-masking fix, executor) in parallel with T4.4 + T4.5.1 (DEPLOY.md + `render.yaml`, deployer, repo only); then the user's yes for T4.5.2 (Render service + disk). The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
 
 ## What exists
 - `CLAUDE.md`, `docs/BRIEF.md`, `.claude/agents/*.md`, `.claude/commands/pipeline.md` — project rules, brief, agent roles, `/pipeline` loop
@@ -71,6 +34,8 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `src/exit_archive/viewer/bundle.py` — `build_viewer_data(work_dir, company_name=None)` → `data/viewer-data.js` (`window.EXIT_ARCHIVE_DATA = {...};`, flat slim schema in the module docstring, `<>&` U+2028/9 escaped, paths only for files that exist); reads JSON via `archive.writer.iter_json_records()` one record at a time. Not yet wired into the exporter (T2.2.3)
 - `src/exit_archive/viewer/__init__.py` + `viewer/index.html` — `build_viewer(work_dir, company_name)` writes `index.html` + `data/viewer-data.js`; called in `_export_into()` after `writer.close()`, before `write_manifest()`. Vanilla JS, `textContent` only, CSP by sha256 hash (+ `'self' file:` for the data script), hrefs only for `^(receipts|invoices|estimates)/[A-Za-z0-9._-]+$`
 - `src/exit_archive/web/` — `app.py` (`create_app(settings, export, payments)`, module-level `app`; routes `/`, `/start`, `POST /jobs`, `/jobs/{id}`, `/jobs/{id}/download`, `/healthz`, `/privacy`; custom 4xx/5xx handlers that never echo input; lifespan wires redaction, store, recovery, one sweep, cleanup loop), `settings.py` (`Settings.from_env`), `forms.py` (token ≤ 512, account id digits, session id), `payments.py` (`PaymentVerifier` protocol, `AllowAllVerifier`, `StripeVerifier` with format + mode checks before any call, 10 s timeout, no redirects/retries; `MalformedSessionError` → 400, `PaymentProviderError` → 503); `/start` verifies before showing the token form, `POST /jobs` re-verifies, `templates/`, `static/app.css` (no inline script/style)
+- `src/exit_archive/web/security.py` — pure-ASGI middlewares, outermost first: SecurityHeaders (CSP `'self'`, HSTS, nosniff, DENY, no-referrer, Permissions-Policy; `no-store` on `/start`, `/jobs/*`, POSTs), then (after AccessLog and ServerError) BodyLimit (16 KB, chunked counted; non-numeric Content-Length → 400), OriginCheck (Origin/Referer vs `PUBLIC_BASE_URL` or Host; absent → allowed; `null` → 403), RateLimit (POST /jobs 5 per 10 min, LRU 10 k keys, `client_key()` = socket peer or the N-th XFF entry from the right)
+- `src/exit_archive/web/accesslog.py` — `AccessLogMiddleware` logs `METHOD path status Nms` on `exit_archive.access` (no query, headers, IP; job ids masked by `mask_path`, %XX-encoded, 120-char cap); `access_logging()` silences `uvicorn.access` for the lifespan. A1: ids in non-`/jobs/` paths are not yet masked (T4.3a)
 - `src/exit_archive/cli.py` — `exit-archive export --out DIR [--account-id ID]`:
   - exit codes: 0 ok, 2 usage, 3 auth, 4 other error, 130 interrupted
   - installs log redaction and pins httpx/httpcore to WARNING
@@ -81,7 +46,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 
 ## How to run, test, deploy
 - Install: `uv sync` (only when dependencies change; Python 3.12 via `uv python install 3.12` if missing)
-- Test: `uv run --offline pytest -q -W error::pytest.PytestDeprecationWarning` (889 tests, coverage gate 80 %; `e2e` and `live` deselected by default)
+- Test: `uv run --offline pytest -q -W error::pytest.PytestDeprecationWarning` (1050 passed / 3 xfailed at f3dc0bc, coverage gate 80 %; `e2e` and `live` deselected by default)
 - Lint/types: `uv run --offline ruff check . && uv run --offline ruff format --check . && uv run --offline mypy src`
 - Token grep: `grep -rln "\.reveal()" src/` must list only `secrets.py` and `harvest/http.py` and `web/payments.py` (Stripe key header)
 - Viewer e2e (optional): `uv sync --group e2e` once (network), `uv run --offline --group e2e playwright install chromium`, then `uv run --offline --group e2e pytest -m e2e -q`. Skips cleanly without Playwright/Chromium
@@ -89,7 +54,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - CLI (**only with the user's yes for the live token**): `set -a; . ~/.harvest_test; set +a; uv run --offline exit-archive export --out ./tmp/out`
 - Web: `PAYMENT_REQUIRED=false DATA_DIR=./tmp/web uv run --offline uvicorn exit_archive.web.app:app --port 8765`, then open `http://localhost:8765/`
 - CI: `curl -s "https://api.github.com/repos/Soham-1827/exit_archive/actions/runs?per_page=1"` → check `conclusion` (repo is public)
-- Deploy: not yet. `docs/DEPLOY.md` and `render.yaml` arrive with T4.4/T4.5; creating the Render service needs the user's yes.
+- Deploy: not yet. `docs/DEPLOY.md` and `render.yaml` arrive with T4.4/T4.5.1 (repo only); creating the Render service (T4.5.2) needs the user's yes.
 - Push: plain `git push` over HTTPS (`gh` is not installed)
 
 ## Decisions made
@@ -100,18 +65,21 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - Offline viewer: a static `index.html` plus a `data/viewer-data.js` script, because `file://` cannot `fetch()` JSON.
 - Token handling:
   - memory only, in the redacted `HarvestToken` type
-  - `.reveal()` only in `secrets.redact()` and `harvest/http.py`
+  - `.reveal()` only in `secrets.py`, `harvest/http.py` and `web/payments.py` (Stripe key)
   - sent only to https `*.harvestapp.com`
   - every export test asserts the token is absent from the zip and the logs
 - PDF URLs (permanent `client_key`) and signed receipt redirect URLs count as secrets in logs, so httpx/httpcore are pinned to WARNING.
 - A per-file failure (receipt, PDF, one invoice's payments) goes into `MANIFEST.missing[]`. Auth, rate-limit and outage errors abort the export.
 - CSV formula-injection guard is on; the JSON keeps original values.
 - 2026-11-24, user: the live token may be used for T1.7's single run, with a copy kept in `./tmp/live/`. Any further live use needs a new yes.
+- Web hardening (T4.3): rate-limit client key from `TRUSTED_PROXY_HOPS` (N-th `X-Forwarded-For` entry from the right; never uvicorn `--forwarded-allow-ips='*'`); Origin check only when Origin/Referer is present; our own path-only access log, `uvicorn.access` silenced; no HEAD support (GET-only routes answer HEAD with 405; checks use GET).
+- `render.yaml` fixes `PAYMENT_REQUIRED=true`: the repo config never ships a free mode. Deploys only after CI passes.
 - Full list with reasons: PLAN.md §6 and the decision log.
 
 ## Open decisions for the user
 - **D1 Hosting — decided 2026-11-25: Render.** Blueprint `render.yaml` (T4.5), Starter service + 10 GB disk (~$10/mo). The user is installing the Render GitHub App; creating the service needs a separate yes.
 - **D2 Payments — decided 2026-11-25: Stripe Payment Link at $49.** The code needs no account. The exact Stripe steps for the user (test mode first, at T4.6) are in TODO.md → Blocked / needs the user → D2.
+- **D7 Stripe test setup before the first deploy** (new, needed at T4.5.2): the app will not start with `PAYMENT_REQUIRED=true` and no Stripe values. Recommended (A): do D2 steps 1-4 in Stripe test mode (free) just before creating the Render service and paste the values when Render prompts; then fix the Payment Link redirect to the real host. (B): a short first deploy with `PAYMENT_REQUIRED=false` set by hand in the dashboard. Either way, the site is effectively free until live keys (test cards work), so keep the URL unannounced until T4.6 passes. Also: Render region (default `oregon`).
 - **D6 Support contact** (new): the error and privacy pages have no support email yet. Ask the user for an address before launch; it becomes `SUPPORT_EMAIL`.
 - **D3 Domain**: optional (~$12/yr).
 - **D4 Tokens that see several accounts**: I recommend an optional Account ID field that fails with the account list when ambiguous. The CLI already behaves this way.
@@ -120,16 +88,9 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - **Trial token**: I recommend keeping it until T4.6 (the launch check runs a real export), then revoking it in Harvest → Developers. If you'd rather revoke it now, create a fresh one for T4.6.
 
 ## Next 3 tasks
-1. **T4.3 hardening: built and uncommitted, needs the tester gate** (see RESUME HERE). It covers:
-   - security headers
-   - a 16 KB body limit
-   - a rate limit keyed via `TRUSTED_PROXY_HOPS`
-   - an Origin check
-   - our own access log (path only, job ids masked)
-   - `Bearer%20` scrubbing
-   - `Secret.__getstate__` returning None
-2. **T4.4 DEPLOY.md + T4.5.1 `render.yaml` (deployer):** prepare in the repo only; no Render service until the user says yes.
-3. **T4.5.2 first deploy and T4.6 launch check:** each needs the user, step by step (Render service + disk, Stripe test mode per TODO D2, D5 privacy wording, D6 support email).
+1. **T4.3a mask job ids in every logged path (executor, 0.25 h), in parallel with 2.** Gate finding A1: `//jobs/<id>` and similar 404 paths log the id verbatim. Fix before the first deploy creates host logs. Test edits are limited to deleting one xfail decorator in `tests/web/test_hardening_adversarial.py` plus a new file `tests/web/test_access_log_masking.py`.
+2. **T4.4 `docs/DEPLOY.md` + T4.5.1 `render.yaml` and the Render section (deployer), repo only.** No Render service or account action. Then the tester or orchestrator reviews it and the main session commits.
+3. **T4.5.2 create the Render service + 10 GB disk (≈ $10/mo): STOP and ask the user first** (D1 yes, D7 order, region). Then T4.6 launch check with Stripe test mode, D5 privacy wording and D6 support email.
 
 ## Gotchas
 - **Agent rules**
@@ -152,6 +113,8 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
   - The web lifespan (T3.2.3) must install redaction and the httpx/httpcore WARNING pin once.
 - **Viewer e2e on this WSL box** needs `libnss3`, `libnspr4`, `libasound2`, which are not installed system-wide. The T2.2 executor unpacked them into a session scratchpad and used `LD_LIBRARY_PATH`, which does not persist. To run e2e locally again, either repeat that or ask the user to `sudo apt install libnss3 libnspr4 libasound2` (never run sudo without asking). CI would use `playwright install --with-deps chromium`.
 - **Deploy (T4.5):** check that the Render persistent disk mounted at `/data` is writable by the image's non-root uid; if not, the fix belongs in the Dockerfile/start command, never in running as root.
+- **uvicorn `--proxy-headers` does nothing on Render** (it trusts only 127.0.0.1). That is fine: the app builds no absolute URLs, and the rate limiter reads `X-Forwarded-For` itself via `TRUSTED_PROXY_HOPS`. A wrong `PUBLIC_BASE_URL` (anything but the exact `https://<host>` origin) makes every POST 403; leaving it unset falls back to the Host header.
+- **Two tester runs once overlapped on the same file** (T4.3). Run at most one tester per task at a time.
 - **Unverified on real data:** the estimate PDF URL, rate limits on a large account, and pagination past page 1 (all under Later).
 - **Tests**
   - `pytest -m live` alone switches the coverage gate off on purpose (it prints ~33 %); any other marker expression keeps the 80 % gate.
@@ -160,7 +123,7 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 ## Secrets and where they live
 - `HARVEST_TOKEN`, `HARVEST_ACCOUNT_ID`: the developer trial account, in `~/.harvest_test` outside the repo, mode 600.
 - `STRIPE_SECRET_KEY` (restricted key) and `STRIPE_PAYMENT_LINK_URL`: not created yet. They will live in the hosting platform's environment settings.
-- `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`: config, not secret. T3.2 adds the names to `.env.example`.
+- `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`, `TRUSTED_PROXY_HOPS`: config, not secret; all listed by name in `.env.example`. On Render, `STRIPE_*` and `PUBLIC_BASE_URL` are `sync: false` (entered in the dashboard).
 
 ## Last updated
-2026-11-25 (session handoff). Last commit: 1e1d9cc (docs; CI green). T4.3 is built and uncommitted, waiting for the tester gate; see RESUME HERE at the top. These doc edits go into the T4.3 commit.
+2026-11-25 (orchestrator review after T4.3). Last commit: f3dc0bc (T4.3 hardening, pushed; CI was running at review time). These doc edits are uncommitted; the main session commits them with `docs: mark T4.3 done, rule on A1 and re-cut T4.5`.
