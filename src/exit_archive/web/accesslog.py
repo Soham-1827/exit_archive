@@ -13,6 +13,7 @@ __all__ = ["ACCESS_LOGGER", "AccessLogMiddleware", "access_logging"]
 
 ACCESS_LOGGER = "exit_archive.access"
 _MAX_PATH = 120
+_ID_RUN = re.compile(r"[A-Za-z0-9_-]{20,}")
 _UNSAFE = re.compile(r"[^\x21-\x7e]")
 _log = logging.getLogger(ACCESS_LOGGER)
 
@@ -22,6 +23,7 @@ def mask_path(path: str) -> str:
     if path.startswith("/jobs/"):
         _, _, _, *rest = path.split("/")
         path = "/jobs/<id>" + "".join("/download" if s == "download" else "/<x>" for s in rest)
+    path = _ID_RUN.sub("<x>", path)  # any id-shaped run, wherever it sits; before cap
     return _UNSAFE.sub(lambda m: f"%{ord(m.group()):02X}", path)[:_MAX_PATH]
 
 

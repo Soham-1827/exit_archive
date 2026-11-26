@@ -213,11 +213,6 @@ def test_masking_covers_job_id_variants(tmp_path: Path, caplog: pytest.LogCaptur
     assert jid not in text
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FINDING-A1 (LOW): mask_path only masks paths starting with /jobs/; a non-routable "
-    "request path such as //jobs/<id> or /./jobs/<id> (404) is logged with the id verbatim",
-)
 def test_double_slash_prefix_does_not_leak_job_id(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
