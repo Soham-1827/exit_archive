@@ -8,7 +8,8 @@ from collections.abc import Callable
 from typing import NoReturn
 
 _MASK = "***"
-_BEARER = re.compile(r"Bearer\s+\S+", re.IGNORECASE)
+# "Bearer <x>", and the URL-encoded forms "Bearer%20<x>" / "Bearer+<x>"
+_BEARER = re.compile(r"Bearer(?:\s|%20|\+)+\S+", re.IGNORECASE)
 
 
 class Secret:
@@ -50,6 +51,10 @@ class Secret:
 
     def __reduce_ex__(self, protocol: object) -> NoReturn:
         raise TypeError(f"{type(self).__name__} cannot be pickled or copied")
+
+    def __getstate__(self) -> None:
+        """Expose no state: the inherited version returns the raw value."""
+        return None
 
     def reveal(self) -> str:
         """Return the raw value. Only the HTTP code that must send it should call this."""

@@ -4,7 +4,8 @@ import asyncio
 import contextlib
 import logging
 import os
-from collections.abc import AsyncIterator
+import time
+from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Annotated
@@ -17,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 from starlette.exceptions import HTTPException as StarletteHTTPException
+from starlette.types import ASGIApp
 
 from exit_archive.archive.writer import resolve_inside
 from exit_archive.errors import ExportError, SessionInUseError
@@ -25,6 +27,7 @@ from exit_archive.jobs.cleanup import run_cleanup_loop, sweep
 from exit_archive.jobs.runner import ARCHIVES_DIR, ExportFn, JobRunner
 from exit_archive.jobs.store import Job, JobStore, to_iso, utcnow
 from exit_archive.secrets import install_log_redaction
+from exit_archive.web.accesslog import AccessLogMiddleware, access_logging
 from exit_archive.web.forms import JOB_ID, BadInputError, parse_job_form
 from exit_archive.web.payments import (
     AllowAllVerifier,
@@ -32,6 +35,13 @@ from exit_archive.web.payments import (
     PaymentProviderError,
     PaymentVerifier,
     StripeVerifier,
+)
+from exit_archive.web.security import (
+    BodyLimitMiddleware,
+    OriginCheckMiddleware,
+    RateLimiter,
+    RateLimitMiddleware,
+    SecurityHeadersMiddleware,
 )
 from exit_archive.web.settings import Settings
 
@@ -42,11 +52,14 @@ _log = logging.getLogger(__name__)
 _MESSAGES = {
     400: "That request could not be processed.",
     402: "Payment could not be confirmed for this request.",
+    403: "That request did not come from this site, so it was not accepted.",
     404: "We could not find that page.",
     405: "That action is not allowed here.",
     409: "This payment has already been used for an export.",
     410: "This archive has expired and was deleted. Archives are kept for 7 days.",
+    413: "That request was too large to accept.",
     422: "The form was incomplete. Go back and fill in the token field.",
+    429: "Too many export requests from your network. Please wait a few minutes and try again.",
     503: "A service we depend on is not available. Please try again in a minute.",
 }
 _UNPAID = (
@@ -94,10 +107,18 @@ def _archive_file(data_dir: Path, job: Job) -> Path:
     return resolved
 
 
+class _HardenedApp(FastAPI):
+    """Wrap the whole middleware stack, so even Starlette's own 500 page carries our headers."""
+
+    def build_middleware_stack(self) -> ASGIApp:
+        return SecurityHeadersMiddleware(AccessLogMiddleware(super().build_middleware_stack()))
+
+
 def create_app(
     settings: Settings | None = None,
     export: ExportFn = export_account,
     payments: PaymentVerifier | None = None,
+    clock: Callable[[], float] = time.monotonic,
 ) -> FastAPI:
     templates = _templates()
 
@@ -110,6 +131,12 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+        with access_logging():
+            async with serve(app):
+                yield
+
+    @asynccontextmanager
+    async def serve(app: FastAPI) -> AsyncIterator[None]:
         cfg = settings or Settings.from_env(os.environ)
         uninstall = install_log_redaction(
             None
@@ -147,9 +174,13 @@ def create_app(
             uninstall_key()
             uninstall()
 
-    app = FastAPI(
+    app = _HardenedApp(
         title="Exit Archive", lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None
     )
+    respond = error_page  # innermost first: the last one added runs first
+    app.add_middleware(RateLimitMiddleware, respond=respond, limiter=RateLimiter(clock=clock))
+    app.add_middleware(OriginCheckMiddleware, respond=respond)
+    app.add_middleware(BodyLimitMiddleware, respond=respond)
     app.mount("/static", StaticFiles(directory=_HERE / "static"), name="static")
 
     @app.exception_handler(RequestValidationError)

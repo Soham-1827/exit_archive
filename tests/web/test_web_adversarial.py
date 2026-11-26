@@ -73,11 +73,11 @@ def test_oversized_token_and_body_no_echo(tmp_path: Path) -> None:
     big = TOKEN + "A" * 2_000_000
     with build(settings_for(tmp_path)) as client:
         r = client.post("/jobs", data={"token": big})
-        assert r.status_code == 400
+        assert r.status_code == 413
         _no_token(r)
         assert len(r.text) < 5000
         r = client.post("/jobs", data={"token": TOKEN, "account_id": "9" * 5_000_000})
-        assert r.status_code == 400
+        assert r.status_code == 413
         _no_token(r)
 
 

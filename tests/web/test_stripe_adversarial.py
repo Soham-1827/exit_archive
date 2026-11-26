@@ -230,11 +230,6 @@ def test_secret_pickle_copy_state_paths() -> None:
     assert KEY not in str([s]) and KEY not in str({"k": s})
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="FINDING-S1 (LOW): Secret.__getstate__ (inherited object.__getstate__) returns the "
-    "slot dict holding the raw value; pickle/copy are blocked but an explicit call leaks",
-)
 def test_get_state_does_not_leak_secret() -> None:
     s = Secret(KEY)
     state = s.__getstate__() if hasattr(s, "__getstate__") else None

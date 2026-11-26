@@ -45,9 +45,11 @@ def test_real_access_logger_reports_no_logging_error(
     logger.setLevel(logging.INFO)
     try:
         with build(settings_for(tmp_path)):
-            logger.info('%s - "%s %s HTTP/%s" %d', *ARGS)
+            logger.info('%s - "%s %s HTTP/%s" %d', ARGS[0], "GET", "/SILENCED-MARKER", "1.1", 200)
+        logger.info('%s - "%s %s HTTP/%s" %d', *ARGS)
     finally:
         logger.removeHandler(handler)
     err = capsys.readouterr().err
     assert "Logging error" not in err
+    assert "SILENCED-MARKER" not in err
     assert 'GET /healthz HTTP/1.1" 200' in err

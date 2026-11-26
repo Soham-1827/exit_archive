@@ -49,6 +49,19 @@ def _jobs(environ: Mapping[str, str]) -> int:
     return int(raw)
 
 
+MAX_PROXY_HOPS = 3
+DEFAULT_JOBS_RATE_LIMIT = 5
+
+
+def _proxy_hops(environ: Mapping[str, str]) -> int:
+    raw = _optional(environ, "TRUSTED_PROXY_HOPS")
+    if raw is None:
+        return 0
+    if not (raw.isascii() and raw.isdigit()) or int(raw) > MAX_PROXY_HOPS:
+        raise _bad("TRUSTED_PROXY_HOPS", f"must be a whole number from 0 to {MAX_PROXY_HOPS}")
+    return int(raw)
+
+
 def _payment_required(environ: Mapping[str, str]) -> bool:
     raw = _optional(environ, "PAYMENT_REQUIRED")
     if raw is None or raw == "true":
@@ -95,6 +108,8 @@ class Settings:
     stripe_payment_link_url: str | None = None
     public_base_url: str | None = None
     stripe_secret_key: Secret | None = field(default=None, repr=False)
+    trusted_proxy_hops: int = 0  # entries from the right of X-Forwarded-For our proxy appended
+    jobs_rate_limit: int | None = None  # POST /jobs per 10 min per client; None = off
 
     @classmethod
     def from_env(cls, environ: Mapping[str, str]) -> "Settings":
@@ -105,6 +120,7 @@ class Settings:
         required = _payment_required(environ)
         link = _link(environ)
         base_url = _base_url(environ)
+        hops = _proxy_hops(environ)
         key = _stripe_key(environ, required)  # Stripe variables last, so older errors keep priority
         if required and link is None:
             raise _bad("STRIPE_PAYMENT_LINK_URL", "is required when PAYMENT_REQUIRED is true")
@@ -115,4 +131,6 @@ class Settings:
             stripe_payment_link_url=link,
             public_base_url=base_url,
             stripe_secret_key=key,
+            trusted_proxy_hops=hops,
+            jobs_rate_limit=DEFAULT_JOBS_RATE_LIMIT,
         )

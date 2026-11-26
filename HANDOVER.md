@@ -1,5 +1,42 @@
 # HANDOVER
 
+## RESUME HERE (written 2026-11-25 at the session handoff; delete this section once T4.3 is committed)
+- **HEAD on main = `1e1d9cc`**, pushed, CI green. Everything up to and including T4.1/T4.2 is committed.
+- **T4.3 hardening is BUILT but UNCOMMITTED in the working tree.** It still needs the tester gate.
+  - Executor's final full run: 953 passed / 0 failed / 2 xfailed, 98.55 %. ruff, format and mypy clean; the reveal grep lists exactly the 3 allowed files.
+  - The working tree holds:
+    - new `src/exit_archive/web/{security,accesslog}.py`
+    - edits to `web/app.py`, `web/settings.py`, `secrets.py` and `.env.example`
+    - new tests: `tests/test_secret_getstate.py`, `tests/web/test_{security_headers,body_limit,rate_limit,origin_check,access_log_middleware}.py`
+    - the orchestrator's uncommitted T4.3 rulings in `TODO.md` and `PLAN.md`
+- **The four existing-test edits are allowed and already verified.** They were ruled in PLAN.md's decision log ("T4.3 executor stop"):
+  1. `tests/web/test_stripe_adversarial.py`: only the xfail decorator on `test_get_state_does_not_leak_secret` was deleted.
+  2. `tests/web/test_web_adversarial.py`: only two `status_code == 400` asserts became `== 413` in `test_oversized_token_and_body_no_echo`.
+  3. `tests/web/test_env_example.py`: only `"TRUSTED_PROXY_HOPS"` was added to `EXPECTED`.
+  4. `tests/web/test_access_log.py::test_real_access_logger_reports_no_logging_error`: the log call moved outside the lifespan, and a SILENCED-MARKER line is logged inside it and asserted absent from stderr.
+  - Every other existing test file must stay identical to `1e1d9cc`.
+- **D1 was rejected and reworked:** `Secret.__getstate__` is now a plain method returning `None`. D2–D5 were accepted: the exit_archive.access logger is made visible; logged paths are sanitised (%XX, 120-char cap, job ids masked); new 403/413/429 pages, with a non-numeric Content-Length giving 400; LRU eviction at 10k keys. Middleware order, outermost first: SecurityHeaders, AccessLog, ServerError, BodyLimit, OriginCheck, RateLimit, router.
+- **The T4.3 tester gate was interrupted when the session ended.** It left a partial, untracked, tester-owned file, `tests/web/test_hardening_adversarial.py` (~600 lines, never run to completion).
+  - The new session's tester owns this file: it may finish it, fix it or rewrite it, then run the full gate and the uvicorn smoke run.
+  - Its checklist is the 9 points in the T4.3 section of TODO.md, plus:
+    - all Secret state paths
+    - no duplicate log handlers after repeated lifespans
+    - CRLF/%0d%0a log-forging
+    - spoofing the left-most XFF entry
+    - Origin `null`, case differences and default ports
+    - headers on a forced 500
+    - a real uvicorn run with `--proxy-headers`, with no query string or token in stderr
+- **After a tester PASS:**
+  1. Commit everything with `feat: harden web app with security headers, body and rate limits, origin check and path-only access log`.
+  2. Push, then check that CI is green with `curl -s "https://api.github.com/repos/Soham-1827/exit_archive/actions/runs?per_page=1"`.
+  3. The orchestrator then updates the docs and removes this section.
+- **Then T4.4** `docs/DEPLOY.md` **plus T4.5.1** `render.yaml`, both in the repo only.
+- **Then STOP and ask the user** before T4.5.2, which creates the Render service and a 10 GB disk for about $10/mo.
+- **The user also owes, and should be asked when relevant:**
+  - D6, a support email for the 402 and privacy pages
+  - D5, approval of the privacy wording
+  - the Stripe test-mode steps in TODO.md under D2
+
 ## Status in one paragraph
 Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` from the environment and writes a complete, checksummed zip from a Harvest account. The archive holds JSON + CSV for 14 resources plus invoice payments, receipts and invoice PDFs. On 2026-11-24 it passed its single user-approved live run against the trial account: counts matched, the receipt size and invoice PDF were verified, the manifest verified, and the token was absent from the zip. Every task went through the executor → tester → commit loop; T1.1 and T1.2 each needed one fix loop and every other task passed first time. Suite: 421 tests, 99.38 % coverage, ~100 s, ruff/mypy clean. Planned hours used: 12.5 of 28. Left: Phase 2, the offline `index.html` viewer (3 h); Phase 3, the web app (6.5 h); Phase 4, ship (6 h). 2026-11-25: Phase 2 done — T2.1 (viewer data bundle) and T2.2 (offline `index.html`, wired into the export) both passed first time; 513 tests, 99.44 %; e2e 16 passed in Chromium. T3.1 (job store, runner, cleanup, concurrent-safe redaction) passed after one fix loop; 607 tests. T3.2 (FastAPI web app: landing, token form, progress, download, privacy draft; payment seam fails closed) passed after one fix loop, which also fixed log redaction so it keeps `record.args` intact (uvicorn access logs work); 750 tests. Phase 3 done 2026-11-25: T3.3 (Stripe Checkout Session verification, respx mocks only, Stripe key as a redacted `Secret`) passed first time; 889 tests. T4.1+T4.2 done: Dockerfile (pinned digests, non-root uid 10001, `$PORT`) and GitHub Actions CI (lint, types, tests, reveal grep, docker build + `/healthz` smoke), green on main. Planned hours used: 24 of 28. T4.3 (hardening) in progress with the executor. The user decided D1 = Render and D2 = Stripe Payment Link; the user wants to be asked before every deployment step (accounts, keys, money).
 
@@ -83,7 +120,14 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - **Trial token**: I recommend keeping it until T4.6 (the launch check runs a real export), then revoking it in Harvest → Developers. If you'd rather revoke it now, create a fresh one for T4.6.
 
 ## Next 3 tasks
-1. **T4.3 hardening (executor, dispatched 2026-11-25):** headers, 16 KB body limit, rate limit keyed via `TRUSTED_PROXY_HOPS`, Origin check, own access log (path only, job ids masked), `Bearer%20` scrubbing, `Secret.__getstate__`.
+1. **T4.3 hardening: built and uncommitted, needs the tester gate** (see RESUME HERE). It covers:
+   - security headers
+   - a 16 KB body limit
+   - a rate limit keyed via `TRUSTED_PROXY_HOPS`
+   - an Origin check
+   - our own access log (path only, job ids masked)
+   - `Bearer%20` scrubbing
+   - `Secret.__getstate__` returning None
 2. **T4.4 DEPLOY.md + T4.5.1 `render.yaml` (deployer):** prepare in the repo only; no Render service until the user says yes.
 3. **T4.5.2 first deploy and T4.6 launch check:** each needs the user, step by step (Render service + disk, Stripe test mode per TODO D2, D5 privacy wording, D6 support email).
 
@@ -119,4 +163,4 @@ Phases 0 and 1 are done. `exit-archive export --out DIR` reads `HARVEST_TOKEN` f
 - `PUBLIC_BASE_URL`, `DATA_DIR`, `MAX_CONCURRENT_JOBS`, `PAYMENT_REQUIRED`: config, not secret. T3.2 adds the names to `.env.example`.
 
 ## Last updated
-2026-11-25. Last commit: cfe1de3 (CI reveal-grep fix; CI green). These doc edits go into the T4.3 commit; T4.3 dispatched next.
+2026-11-25 (session handoff). Last commit: 1e1d9cc (docs; CI green). T4.3 is built and uncommitted, waiting for the tester gate; see RESUME HERE at the top. These doc edits go into the T4.3 commit.
