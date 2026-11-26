@@ -59,8 +59,47 @@ jobs:
           done
           docker logs ea
           exit 1
-      - name: Container runs as non-root
-        run: test "$(docker run --rm exit-archive id -u)" != "0"
+      - name: Container drops to uid/gid 10001 with no capabilities
+        run: |
+          status="$(docker exec ea grep -E '^(Uid|Gid|CapEff):' /proc/1/status)"
+          echo "$status"
+          test "$(echo "$status" | wc -l)" = 3
+          echo "$status" | grep -E '^(Uid|Gid):' | while read -r _ ids; do
+            for id in $ids; do test "$id" = "10001"; done
+          done
+          echo "$status" | grep -qx 'CapEff:[[:space:]]0000000000000000'
+      - name: Root-owned bind-mounted /data is fixed by the entrypoint
+        run: |
+          docker rm -f ea-bind >/dev/null 2>&1 || true
+          dir="$(mktemp -d)"
+          sudo chown 0:0 "$dir"
+          sudo chmod 755 "$dir"
+          test "$(stat -c %u "$dir")" = "0"
+          docker run -d --name ea-bind -e PAYMENT_REQUIRED=false -p 8001:8000 \
+            -v "$dir":/data exit-archive
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS localhost:8001/healthz; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then docker logs ea-bind; exit 1; fi
+          test "$(stat -c %u "$dir")" = "10001"
+          test -d "$dir/archives"
+          test "$(stat -c %u "$dir/archives")" = "10001"
+      - name: Non-root start (--user 10001:10001) with a named volume
+        run: |
+          docker rm -f ea-user >/dev/null 2>&1 || true
+          docker volume create ea-user-data
+          docker run -d --name ea-user --user 10001:10001 -e PAYMENT_REQUIRED=false \
+            -p 8002:8000 -v ea-user-data:/data exit-archive
+          ok=0
+          for _ in $(seq 1 30); do
+            if curl -fsS localhost:8002/healthz; then ok=1; break; fi
+            sleep 1
+          done
+          if [ "$ok" != 1 ]; then docker logs ea-user; exit 1; fi
       - name: Cleanup
         if: always()
-        run: docker rm -f ea
+        run: |
+          docker rm -f ea ea-bind ea-user || true
+          docker volume rm ea-user-data || true

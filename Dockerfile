@@ -18,6 +18,7 @@ RUN groupadd --gid 10001 app \
     && useradd --uid 10001 --gid 10001 --no-create-home --shell /usr/sbin/nologin app \
     && mkdir /data && chown 10001:10001 /data
 COPY --from=builder /app/.venv /app/.venv
+COPY --chmod=0755 --chown=0:0 docker/entrypoint.sh /usr/local/bin/entrypoint.sh
 ENV DATA_DIR=/data \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -25,7 +26,10 @@ ENV DATA_DIR=/data \
 WORKDIR /app
 VOLUME /data
 EXPOSE 8000
-USER 10001:10001
+# Root only so the entrypoint can chown a root-owned mounted /data; it then drops to
+# uid/gid 10001 with no capabilities (setpriv, util-linux) before exec'ing the CMD.
+USER root
+ENTRYPOINT ["/usr/local/bin/entrypoint.sh"]
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["sh", "-c", "python -c \"import os,urllib.request; urllib.request.urlopen('http://127.0.0.1:'+os.environ.get('PORT','8000')+'/healthz', timeout=4)\""]
 CMD ["sh", "-c", "exec uvicorn exit_archive.web.app:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1 --proxy-headers"]

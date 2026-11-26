@@ -37,11 +37,11 @@ Verify the value after every platform or proxy change (see the rate-limit check 
 
 ## Run the container locally
 
-No Stripe values are needed with `PAYMENT_REQUIRED=false`. The container runs as uid 10001, so the mounted directory must be writable by that uid.
+No Stripe values are needed with `PAYMENT_REQUIRED=false`. The container starts as root only so its entrypoint can fix the data directory's owner, then runs the app as uid 10001 with no capabilities.
 
 ```bash
 docker build -t exit-archive .
-mkdir -p /tmp/ea-data && chmod 777 /tmp/ea-data   # or: sudo chown 10001:10001 /tmp/ea-data
+mkdir -p /tmp/ea-data
 docker run --rm -p 8000:8000 \
   -e PAYMENT_REQUIRED=false \
   -e PORT=8000 \
@@ -49,7 +49,7 @@ docker run --rm -p 8000:8000 \
   exit-archive
 ```
 
-Open `http://localhost:8000/`. `curl http://localhost:8000/healthz` returns 200. With a named volume instead of a bind mount, Docker copies the image's `/data` ownership (uid 10001) into the new volume, so no `chmod` is needed: `-v ea-data:/data`.
+Open `http://localhost:8000/`. `curl http://localhost:8000/healthz` returns 200. At start the entrypoint changes the owner of the bind-mounted top-level directory to uid 10001 (so `/tmp/ea-data` on the host becomes owned by 10001; no `chmod` needed, contents are not touched). A named volume works the same way: `-v ea-data:/data`. Starting with `--user 10001:10001` skips the entrypoint's chown, so the mounted directory must already be writable by that uid.
 
 ## Rotate `STRIPE_SECRET_KEY`
 
@@ -140,10 +140,10 @@ Replace `<host>` with the service host. Use GET; `HEAD` answers 405 on these rou
    ```
    Expect `301` or `308` and a `https://<host>/` URL.
 3. Health: `curl -sS -o /dev/null -w '%{http_code}\n' https://<host>/healthz` returns `200`.
-4. **`/data` ownership.** The image creates `/data` owned by uid 10001 and runs as uid 10001, but Render mounts the persistent disk over `/data`, and the mounted disk's ownership is not documented to match. Prove it: run a test job (test-mode purchase, trial token) and confirm the archive lands on the disk. In the service's Shell, run `ls -ld /data` and `ls /data/archives` (shell tab on Render; the shell user is the same as the app's). A write failure shows as a failed job and a logged exception type. If `/data` is not writable by uid 10001, the fix belongs in the image or start command and must never be running the app as root. Candidate fixes (none applied):
-   - an entrypoint script that starts as root only long enough to `chown 10001:10001 /data`, then drops to uid 10001 with `setpriv`, `gosu` or `su-exec` before `exec uvicorn`;
-   - have the app create a subdirectory under `/data` at startup (works only if `/data` itself is writable);
-   - a disk-owner setting, if Render documents one at that time.
+4. **`/data` ownership.** Render mounts the persistent disk over `/data`, and its docs do not say who owns the mounted disk. The fix is applied in the image: `docker/entrypoint.sh` starts as root, creates `/data` if needed, changes the owner of that one directory (never its contents) to uid 10001 when it is not already, then drops to uid/gid 10001 with no capabilities (`setpriv`) before `exec uvicorn`. The app itself never runs as root. Still confirm it at first deploy:
+   - In the service's Shell run `ls -ln /data`. The `.` entry (`ls -lnd /data`) and `archives` must show owner and group `10001`. A Render Shell may run as root, so judge by `ls -ln`, not by whether the shell can write.
+   - Run a test job (test-mode purchase, trial token) and confirm the archive lands under `/data/archives` (`ls -ln /data/archives`).
+   - If `/data` is not owned by 10001, or the deploy log shows `entrypoint: cannot chown data directory`, stop and report; do not work around it by running the app as root.
 5. **Rate limit and forged `X-Forwarded-For` (T4.6.1a).** `render.yaml` sets `TRUSTED_PROXY_HOPS=1`. Render's public documentation I could read does not state how its router writes `X-Forwarded-For`, so `1` (the right-most entry, which a client cannot forge) is used; at worst it keys on a proxy hop and over-limits, which fails safe. Verify on the live host, using throwaway input so no real token is sent:
    - Send 6 `POST /jobs` requests from one machine. Expect the 6th to return 429.
    - From a second network (for example a phone hotspot) a request is still accepted (not 429). If it is 429, every buyer shares one bucket: the value is too low.
