@@ -1,0 +1,32 @@
+# Render Blueprint for Exit Archive. Spec: https://render.com/docs/blueprint-spec
+# No secret values live here: sync:false keys are prompted for in the Render dashboard.
+# See docs/DEPLOY.md ("Render") for the click steps and the first-deploy checks.
+services:
+  - type: web
+    name: exit-archive
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: starter
+    numInstances: 1 # a service with a disk runs as exactly one instance
+    # region: oregon # the default; set it here before the first Blueprint sync to change it
+    healthCheckPath: /healthz # no port key: the Docker CMD reads $PORT, which Render injects
+    autoDeployTrigger: checksPass # deploy a commit only after its CI checks pass
+    disk:
+      name: archives
+      mountPath: /data
+      sizeGB: 10
+    envVars:
+      - key: PAYMENT_REQUIRED
+        value: "true" # fixed: the repo never ships a free mode
+      - key: DATA_DIR
+        value: /data
+      - key: MAX_CONCURRENT_JOBS
+        value: "2"
+      - key: TRUSTED_PROXY_HOPS
+        value: "1" # right-most X-Forwarded-For entry; see docs/DEPLOY.md
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_PAYMENT_LINK_URL
+        sync: false
+      - key: PUBLIC_BASE_URL
+        sync: false
